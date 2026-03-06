@@ -70,7 +70,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick rclone
-          pip install yt-dlp requests
+          pip install -U yt-dlp requests
 
       - name: Install Remotion dependencies
         working-directory: remotion-captions
@@ -100,31 +100,22 @@ jobs:
 
           echo "📥 Downloading video from: ${{ inputs.video_url }}"
 
-          # Set up YouTube cookies if provided (bypasses bot detection)
+          # android client bypasses YouTube n-challenge JS entirely — no JS solver needed
+          # Always use android,web regardless of cookies
           COOKIE_ARG=""
           if [ -n "$YOUTUBE_COOKIES_B64" ]; then
             echo "$YOUTUBE_COOKIES_B64" | base64 -d > /tmp/yt_cookies.txt
             COOKIE_ARG="--cookies /tmp/yt_cookies.txt"
-            # android client doesn't support cookies — use web client only
-            PLAYER_CLIENTS="web"
-            echo "🍪 Using YouTube cookies (web client)"
-          else
-            # android client bypasses bot checks better when no cookies
-            PLAYER_CLIENTS="android,web"
-            echo "📱 No cookies — using android+web client"
+            echo "🍪 Using YouTube cookies"
           fi
 
-          # Use Node.js as JS runtime for n-challenge solving
-          NODE_PATH=$(which node)
-
           yt-dlp \
-            --format "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
+            --format "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" \
             --merge-output-format mp4 \
             --output "workspace/source/source.mp4" \
             --no-playlist \
             --socket-timeout 30 \
-            --extractor-args "youtube:player_client=$PLAYER_CLIENTS" \
-            --js-runtimes "node:$NODE_PATH" \
+            --extractor-args "youtube:player_client=android,web" \
             $COOKIE_ARG \
             "${{ inputs.video_url }}"
 
