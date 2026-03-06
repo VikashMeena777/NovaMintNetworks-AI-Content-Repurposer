@@ -92,7 +92,7 @@
 - [x] All 6 workflow bugs fixed (user_id, JSON, SRT, props, rclone, error handler)
 - [x] Pipeline trigger API route (`/api/trigger-pipeline`)
 - [x] API gateway dispatch error surfacing fix
-- [ ] Run `migration_phase4.sql` in Supabase SQL Editor
+- [x] Run `migration_phase4.sql` in Supabase SQL Editor
 - [x] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
 - [x] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO
 - [ ] End-to-end pipeline test
@@ -135,4 +135,4 @@ GDRIVE_FOLDER_ID=(set)
 
 ---
 
-*Last updated: 2026-03-07 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Pipeline code done ✅ All secrets set ✅ Pending: migration_phase4.sql + end-to-end test ⏳*
+*Last updated: 2026-03-07 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Pipeline code done ✅ All secrets set ✅ Migration done ✅ Pending: end-to-end test ⏳*
