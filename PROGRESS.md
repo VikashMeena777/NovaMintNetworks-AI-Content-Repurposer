@@ -43,12 +43,15 @@
 - [x] Auth middleware (API key hashing + Supabase lookup)
 - [x] Rate limiting (KV-backed)
 - [x] CORS handling
-- ❌ **NOT DEPLOYED** — Need `npx wrangler deploy` + secrets
+- ✅ **DEPLOYED** — `https://clipmint-api.novamint.workers.dev`
+- ✅ **SECRETS SET** — SUPABASE_URL, SUPABASE_SERVICE_KEY, GITHUB_TOKEN, GITHUB_REPO
+- ✅ **GITHUB REPO** — `VikashMeena777/NovaMintNetworks-AI-Content-Repurposer`
 
 ### 5. GitHub Actions (`.github/workflows/`)
 - [x] `process-video.yml` — Main 11-step pipeline
 - [x] `health-check.yml` — Daily cron health check
-- ❌ **NOT TESTED** — Need repo secrets configured
+- ✅ **REPO SECRETS SET** — SUPABASE_URL, SUPABASE_SERVICE_KEY
+- ⏳ **Phase 4 secrets pending** — GROQ_API_KEY, GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_KEY
 
 ---
 
@@ -69,10 +72,14 @@
 - [x] Replace mock data with real Supabase queries
 - [x] All 7 dashboard pages wired to Supabase
 
-### Phase 3: Deploy
-- [ ] Deploy dashboard to Vercel
-- [ ] Deploy API Gateway to Cloudflare Workers with secrets
-- [ ] Configure GitHub repo secrets for Actions
+### Phase 3: Deploy — ✅ DONE
+- [x] Deploy dashboard to Vercel ✅ → `https://ai-content-repurposer-beta.vercel.app`
+- [x] Supabase Auth redirect URLs configured for Vercel domain
+- [x] Deploy API Gateway to Cloudflare Workers ✅ → `https://clipmint-api.novamint.workers.dev`
+- [x] Worker secrets set (SUPABASE_URL, SUPABASE_SERVICE_KEY, GITHUB_TOKEN, GITHUB_REPO)
+- [x] CORS locked to Vercel domain
+- [x] Configure GitHub repo secrets for Actions ✅ (SUPABASE_URL, SUPABASE_SERVICE_KEY)
+- [x] Vercel env var NEXT_PUBLIC_API_URL set to Worker URL
 
 ### Phase 4: AI Integration (Week 2 from roadmap)
 - [ ] Groq integration for viral scoring, titles, hashtags
@@ -83,20 +90,20 @@
 
 ## 🔧 Environment Variables Needed
 
-### Dashboard (`.env.local`)
+### Dashboard (Vercel env vars) — ✅ SET
 ```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_API_URL=https://clipmint-api.<subdomain>.workers.dev
+NEXT_PUBLIC_SUPABASE_URL=https://zwgooqazqxqnfdgmhsev.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...(set)
+NEXT_PUBLIC_API_URL=https://clipmint-api.novamint.workers.dev
 ```
 
-### API Gateway (Cloudflare Worker secrets)
+### API Gateway (Cloudflare Worker secrets) — ✅ SET
 ```
-SUPABASE_URL=
-SUPABASE_SERVICE_KEY=
-GITHUB_TOKEN=
+SUPABASE_URL=https://zwgooqazqxqnfdgmhsev.supabase.co
+SUPABASE_SERVICE_KEY=(set)
+GITHUB_TOKEN=(set)
 GITHUB_REPO=VikashMeena777/NovaMintNetworks-AI-Content-Repurposer
-CORS_ORIGIN=https://clipmint.vercel.app
+CORS_ORIGIN=https://ai-content-repurposer-beta.vercel.app
 RATE_LIMIT_PER_MINUTE=30
 ```
 
@@ -111,4 +118,4 @@ GOOGLE_SERVICE_ACCOUNT_KEY=
 
 ---
 
-*Last updated: 2026-03-06 — Schema deployed ✅ All pages wired ✅ Build verified ✅*
+*Last updated: 2026-03-06 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Secrets configured ✅*

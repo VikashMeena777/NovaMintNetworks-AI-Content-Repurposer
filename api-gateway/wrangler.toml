@@ -9,10 +9,10 @@ compatibility_date = "2024-12-01"
 # GITHUB_REPO (e.g. "username/13-ClipMint")
 
 [vars]
-CORS_ORIGIN = "*"
+CORS_ORIGIN = "https://ai-content-repurposer-beta.vercel.app"
 RATE_LIMIT_PER_MINUTE = 30
 
 # KV namespace for rate limiting and caching
 [[kv_namespaces]]
 binding = "CACHE"
-id = "your-kv-namespace-id"
+id = "55b5044b918345eabcadd5bc6868410b"
