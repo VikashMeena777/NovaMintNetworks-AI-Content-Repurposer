@@ -95,7 +95,7 @@ NEXT_PUBLIC_API_URL=https://clipmint-api.<subdomain>.workers.dev
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 GITHUB_TOKEN=
-GITHUB_REPO=<username>/13-ClipMint
+GITHUB_REPO=VikashMeena777/NovaMintNetworks-AI-Content-Repurposer
 CORS_ORIGIN=https://clipmint.vercel.app
 RATE_LIMIT_PER_MINUTE=30
 ```
