@@ -38,8 +38,8 @@
 
 ## Phase 4 — AI Integration (Final Steps) ⏳
 - [ ] Run `migration_phase4.sql` in Supabase SQL Editor
-- [ ] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
-- [ ] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO
+- [x] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID ✅
+- [x] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO ✅
 - [ ] End-to-end pipeline test: submit URL → clips generated → download
 
 **Future product:** AI Content Creator (separate wrapper, build later)

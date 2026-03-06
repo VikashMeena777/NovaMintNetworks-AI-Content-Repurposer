@@ -51,13 +51,12 @@
 ### 5. GitHub Actions (`.github/workflows/`)
 - [x] `process-video.yml` — Main 12-step pipeline (all 6 bugs fixed)
 - [x] `health-check.yml` — Daily cron health check
-- ✅ **REPO SECRETS SET** — SUPABASE_URL, SUPABASE_SERVICE_KEY
-- ⏳ **Phase 4 secrets pending** — GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
+- ✅ **REPO SECRETS SET** — SUPABASE_URL, SUPABASE_SERVICE_KEY, GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
 
 ### 6. Pipeline Trigger (`dashboard/src/app/api/trigger-pipeline/`)
 - [x] Server-side API route — securely triggers GitHub Actions workflow_dispatch
 - [x] `new/page.tsx` updated — calls trigger after job creation
-- ⏳ **Vercel env vars pending** — GITHUB_TOKEN, GITHUB_REPO
+- ✅ **Vercel env vars set** — GITHUB_TOKEN, GITHUB_REPO
 
 ---
 
@@ -87,14 +86,15 @@
 - [x] Configure GitHub repo secrets for Actions ✅ (SUPABASE_URL, SUPABASE_SERVICE_KEY)
 - [x] Vercel env var NEXT_PUBLIC_API_URL set to Worker URL
 
-### Phase 4: AI Integration — ✅ CODE DONE, SECRETS PENDING
+### Phase 4: AI Integration — ✅ FULLY CONFIGURED
 - [x] Groq Whisper transcription in `process-video.yml` Step 4
 - [x] Groq LLaMA 3.3 viral analysis in Step 5 (Python)
 - [x] All 6 workflow bugs fixed (user_id, JSON, SRT, props, rclone, error handler)
 - [x] Pipeline trigger API route (`/api/trigger-pipeline`)
+- [x] API gateway dispatch error surfacing fix
 - [ ] Run `migration_phase4.sql` in Supabase SQL Editor
-- [ ] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
-- [ ] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO
+- [x] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
+- [x] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO
 - [ ] End-to-end pipeline test
 
 ---
@@ -108,9 +108,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...(set)
 NEXT_PUBLIC_API_URL=https://clipmint-api.novamint.workers.dev
 ```
 
-### Dashboard extra (Vercel env vars) — ⏳ PENDING
+### Dashboard extra (Vercel env vars) — ✅ SET
 ```
-GITHUB_TOKEN=(pending) — for pipeline trigger
+GITHUB_TOKEN=(set)
 GITHUB_REPO=VikashMeena777/NovaMintNetworks-AI-Content-Repurposer
 ```
 
@@ -124,15 +124,15 @@ CORS_ORIGIN=https://ai-content-repurposer-beta.vercel.app
 RATE_LIMIT_PER_MINUTE=30
 ```
 
-### GitHub Actions (repo secrets) — ⏳ PARTIALLY SET
+### GitHub Actions (repo secrets) — ✅ SET
 ```
 SUPABASE_URL=(set)
 SUPABASE_SERVICE_KEY=(set)
-GROQ_API_KEY=(pending)
-RCLONE_CONF_B64=(pending)
-GDRIVE_FOLDER_ID=(pending)
+GROQ_API_KEY=(set)
+RCLONE_CONF_B64=(set)
+GDRIVE_FOLDER_ID=(set)
 ```
 
 ---
 
-*Last updated: 2026-03-06 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Pipeline code done ✅ Secrets pending ⏳*
+*Last updated: 2026-03-07 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Pipeline code done ✅ All secrets set ✅ Pending: migration_phase4.sql + end-to-end test ⏳*
