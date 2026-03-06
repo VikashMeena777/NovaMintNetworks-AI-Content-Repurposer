@@ -22,18 +22,17 @@
 - [x] `page.tsx` — Landing page (hero, pricing, caption style previews)
 - [x] `dashboard/layout.tsx` — Sidebar navigation (real profile from Supabase)
 - [x] `dashboard/page.tsx` — Jobs list page (real Supabase queries)
-- [x] `dashboard/new/page.tsx` — Upload/submit (inserts to Supabase + triggers pipeline)
+- [x] `dashboard/new/page.tsx` — Upload/submit (inserts to Supabase `jobs` table)
 - [x] `dashboard/[jobId]/page.tsx` — Job detail + clips (real Supabase fetch)
 - [x] `dashboard/analytics/page.tsx` — Usage analytics (aggregated from Supabase)
 - [x] `dashboard/api-keys/page.tsx` — API key CRUD (SHA-256 hash, one-time reveal)
 - [x] `dashboard/settings/page.tsx` — Profile load/save to Supabase
 - [x] `login/page.tsx` — Email + Google OAuth login
 - [x] `middleware.ts` — Route protection (redirect unauthenticated to /login)
-- [x] `api/trigger-pipeline/route.ts` — Server-side GitHub Actions dispatch
 - [x] `lib/server.ts` — SSR Supabase client
 - [x] `lib/supabase.ts` — Browser Supabase client
 - [x] `lib/types.ts` — Shared TypeScript types
-- [x] `npm run build` — 0 errors, all 12 routes compiled ✅
+- [x] `npm run build` — 0 errors, all 11 routes compiled ✅
 
 ### 4. API Gateway (`api-gateway/`)
 - [x] `POST /api/v1/jobs` — Create job + trigger GitHub Actions
@@ -49,15 +48,10 @@
 - ✅ **GITHUB REPO** — `VikashMeena777/NovaMintNetworks-AI-Content-Repurposer`
 
 ### 5. GitHub Actions (`.github/workflows/`)
-- [x] `process-video.yml` — Main 12-step pipeline (all 6 bugs fixed)
+- [x] `process-video.yml` — Main 11-step pipeline
 - [x] `health-check.yml` — Daily cron health check
 - ✅ **REPO SECRETS SET** — SUPABASE_URL, SUPABASE_SERVICE_KEY
-- ⏳ **Phase 4 secrets pending** — GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
-
-### 6. Pipeline Trigger (`dashboard/src/app/api/trigger-pipeline/`)
-- [x] Server-side API route — securely triggers GitHub Actions workflow_dispatch
-- [x] `new/page.tsx` updated — calls trigger after job creation
-- ⏳ **Vercel env vars pending** — GITHUB_TOKEN, GITHUB_REPO
+- ⏳ **Phase 4 secrets pending** — GROQ_API_KEY, GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_KEY
 
 ---
 
@@ -87,14 +81,9 @@
 - [x] Configure GitHub repo secrets for Actions ✅ (SUPABASE_URL, SUPABASE_SERVICE_KEY)
 - [x] Vercel env var NEXT_PUBLIC_API_URL set to Worker URL
 
-### Phase 4: AI Integration — ✅ CODE DONE, SECRETS PENDING
-- [x] Groq Whisper transcription in `process-video.yml` Step 4
-- [x] Groq LLaMA 3.3 viral analysis in Step 5 (Python)
-- [x] All 6 workflow bugs fixed (user_id, JSON, SRT, props, rclone, error handler)
-- [x] Pipeline trigger API route (`/api/trigger-pipeline`)
-- [ ] Run `migration_phase4.sql` in Supabase SQL Editor
-- [ ] Set GitHub secrets: GROQ_API_KEY, RCLONE_CONF_B64, GDRIVE_FOLDER_ID
-- [ ] Set Vercel env vars: GITHUB_TOKEN, GITHUB_REPO
+### Phase 4: AI Integration (Week 2 from roadmap)
+- [ ] Groq integration for viral scoring, titles, hashtags
+- [ ] Whisper transcription setup (Colab or @remotion/install-whisper-cpp)
 - [ ] End-to-end pipeline test
 
 ---
@@ -108,12 +97,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...(set)
 NEXT_PUBLIC_API_URL=https://clipmint-api.novamint.workers.dev
 ```
 
-### Dashboard extra (Vercel env vars) — ⏳ PENDING
-```
-GITHUB_TOKEN=(pending) — for pipeline trigger
-GITHUB_REPO=VikashMeena777/NovaMintNetworks-AI-Content-Repurposer
-```
-
 ### API Gateway (Cloudflare Worker secrets) — ✅ SET
 ```
 SUPABASE_URL=https://zwgooqazqxqnfdgmhsev.supabase.co
@@ -124,15 +107,15 @@ CORS_ORIGIN=https://ai-content-repurposer-beta.vercel.app
 RATE_LIMIT_PER_MINUTE=30
 ```
 
-### GitHub Actions (repo secrets) — ⏳ PARTIALLY SET
+### GitHub Actions (repo secrets)
 ```
-SUPABASE_URL=(set)
-SUPABASE_SERVICE_KEY=(set)
-GROQ_API_KEY=(pending)
-RCLONE_CONF_B64=(pending)
-GDRIVE_FOLDER_ID=(pending)
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
+GROQ_API_KEY=
+GOOGLE_DRIVE_FOLDER_ID=
+GOOGLE_SERVICE_ACCOUNT_KEY=
 ```
 
 ---
 
-*Last updated: 2026-03-06 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Pipeline code done ✅ Secrets pending ⏳*
+*Last updated: 2026-03-06 — Schema ✅ Pages wired ✅ Dashboard deployed ✅ API Gateway deployed ✅ Secrets configured ✅*

@@ -1,6 +1,6 @@
 # ClipMint — Video Processing Pipeline
 #
-# Triggered by Supabase webhook or manual dispatch.
+# Triggered by API Gateway (workflow_dispatch) or manual trigger.
 # Downloads video → transcribes → AI analysis → clips → captions → uploads
 #
 name: Process Video
@@ -69,12 +69,24 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg imagemagick
-          pip install yt-dlp google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          sudo apt-get install -y ffmpeg imagemagick rclone
+          pip install yt-dlp requests
 
       - name: Install Remotion dependencies
         working-directory: remotion-captions
         run: npm ci
+
+      - name: Update job status → downloading
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "downloading", "progress": 5, "started_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
 
       # ─────────────────────────────────────────────────────────────
       # 2. Download Source Video
@@ -83,7 +95,7 @@ jobs:
         id: download
         run: |
           mkdir -p workspace/source workspace/audio workspace/clips workspace/captioned workspace/thumbnails
-          
+
           echo "📥 Downloading video from: ${{ inputs.video_url }}"
           yt-dlp \
             --format "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
@@ -92,7 +104,7 @@ jobs:
             --no-playlist \
             --socket-timeout 30 \
             "${{ inputs.video_url }}"
-          
+
           # Get video duration
           DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 workspace/source/source.mp4)
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
@@ -110,117 +122,225 @@ jobs:
             -y -loglevel warning
           echo "✅ Audio extracted"
 
+      - name: Update job status → transcribing
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "transcribing", "progress": 20}'
+
       # ─────────────────────────────────────────────────────────────
-      # 4. Transcribe with Whisper (via API)
+      # 4. Transcribe with Groq Whisper API
       # ─────────────────────────────────────────────────────────────
       - name: Transcribe audio
         id: transcribe
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          echo "🗣️ Transcribing audio..."
-          
-          # Use Groq Whisper API for transcription (free tier: whisper-large-v3-turbo)
+          echo "🗣️ Transcribing audio with Groq Whisper..."
+
           # Split audio into 25MB chunks if needed (Groq limit)
-          FILE_SIZE=$(stat -f%z workspace/audio/audio.wav 2>/dev/null || stat --printf="%s" workspace/audio/audio.wav)
+          FILE_SIZE=$(stat --printf="%s" workspace/audio/audio.wav)
           MAX_SIZE=25000000
-          
+
           if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
-            echo "⚠️ Audio file too large ($FILE_SIZE bytes), splitting..."
+            echo "⚠️ Audio file too large ($FILE_SIZE bytes), splitting into 5-min chunks..."
             ffmpeg -i workspace/audio/audio.wav -f segment -segment_time 300 \
               -c copy workspace/audio/chunk_%03d.wav -y -loglevel warning
           else
             cp workspace/audio/audio.wav workspace/audio/chunk_000.wav
           fi
-          
-          # Transcribe each chunk
+
+          # Transcribe each chunk and merge SRT
           > workspace/audio/full_transcript.srt
-          OFFSET=0
-          
+
           for chunk in workspace/audio/chunk_*.wav; do
             echo "  Transcribing $chunk..."
-            
-            RESPONSE=$(curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
+
+            curl -s -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
               -H "Authorization: Bearer $GROQ_API_KEY" \
               -F "file=@$chunk" \
               -F "model=whisper-large-v3-turbo" \
               -F "response_format=srt" \
-              -F "language=en")
-            
-            echo "$RESPONSE" >> workspace/audio/full_transcript.srt
+              -F "language=en" \
+              >> workspace/audio/full_transcript.srt
+
             echo "" >> workspace/audio/full_transcript.srt
           done
-          
+
           echo "✅ Transcription complete"
           echo "srt_path=workspace/audio/full_transcript.srt" >> $GITHUB_OUTPUT
 
+      - name: Update job status → analyzing
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "analyzing", "progress": 40}'
+
       # ─────────────────────────────────────────────────────────────
-      # 5. AI Analysis — Find Viral Moments
+      # 5. AI Analysis — Find Viral Moments (Python — no shell escaping issues)
       # ─────────────────────────────────────────────────────────────
       - name: AI viral moment detection
         id: ai_analysis
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          MAX_CLIPS: ${{ inputs.max_clips }}
         run: |
           echo "🧠 Analyzing transcript for viral moments..."
-          
-          TRANSCRIPT=$(cat workspace/audio/full_transcript.srt)
-          MAX_CLIPS=${{ inputs.max_clips }}
-          
-          # Call Groq LLaMA for viral moment detection
-          RESPONSE=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
-            -H "Authorization: Bearer $GROQ_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$(cat <<EOF
-          {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [
-              {
-                "role": "system",
-                "content": "You are a viral content expert. Analyze the transcript and identify the top ${MAX_CLIPS} moments that would make viral short-form clips. Return ONLY valid JSON."
+
+          python3 << 'PYTHON_SCRIPT'
+          import json, os, requests
+
+          groq_key = os.environ["GROQ_API_KEY"]
+          max_clips = os.environ.get("MAX_CLIPS", "10")
+
+          with open("workspace/audio/full_transcript.srt") as f:
+              transcript = f.read()
+
+          if not transcript.strip():
+              print("❌ Empty transcript — cannot analyze")
+              # Create a fallback: one clip of the whole video
+              fallback = [{"start_time": 0, "end_time": 30, "viral_score": 50,
+                          "title": "Full Clip", "description": "Full excerpt",
+                          "hashtags": ["#content", "#viral", "#shorts", "#reels", "#trending"],
+                          "hook": "Watch this!"}]
+              with open("workspace/clips/viral_moments.json", "w") as f:
+                  json.dump({"clips": fallback}, f, indent=2)
+              exit(0)
+
+          prompt = f"""Analyze this SRT transcript and find the top {max_clips} viral-worthy moments.
+
+          For each moment, provide:
+          - start_time: start timestamp in seconds (float)
+          - end_time: end timestamp in seconds (float, clip should be 15-60 seconds)
+          - viral_score: 1-100 rating
+          - title: catchy title for the clip
+          - description: brief description
+          - hashtags: array of 5 relevant hashtags
+          - hook: compelling first-line hook caption
+
+          Return as JSON object with a "clips" key containing the array.
+
+          Transcript:
+          {transcript[:8000]}"""
+
+          response = requests.post(
+              "https://api.groq.com/openai/v1/chat/completions",
+              headers={
+                  "Authorization": f"Bearer {groq_key}",
+                  "Content-Type": "application/json"
               },
-              {
-                "role": "user",
-                "content": "Analyze this SRT transcript and find the top ${MAX_CLIPS} viral-worthy moments.\n\nFor each moment, provide:\n- start_time: start timestamp in seconds (float)\n- end_time: end timestamp in seconds (float) \n- viral_score: 1-100 rating\n- title: catchy title for the clip\n- description: brief description\n- hashtags: array of 5 relevant hashtags\n- hook: compelling first-line hook caption\n\nReturn as JSON array.\n\nTranscript:\n${TRANSCRIPT}"
-              }
-            ],
-            "temperature": 0.7,
-            "max_tokens": 4096,
-            "response_format": {"type": "json_object"}
-          }
-          EOF
-          )")
-          
-          echo "$RESPONSE" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          content = data['choices'][0]['message']['content']
-          with open('workspace/clips/viral_moments.json', 'w') as f:
+              json={
+                  "model": "llama-3.3-70b-versatile",
+                  "messages": [
+                      {"role": "system", "content": "You are a viral content expert. Return ONLY valid JSON."},
+                      {"role": "user", "content": prompt}
+                  ],
+                  "temperature": 0.7,
+                  "max_tokens": 4096,
+                  "response_format": {"type": "json_object"}
+              },
+              timeout=60
+          )
+
+          data = response.json()
+          content = data["choices"][0]["message"]["content"]
+
+          with open("workspace/clips/viral_moments.json", "w") as f:
               f.write(content)
-          print('✅ Found viral moments')
-          "
+
+          parsed = json.loads(content)
+          clips = parsed.get("clips", parsed) if isinstance(parsed, dict) else parsed
+          print(f"✅ Found {len(clips)} viral moments")
+          PYTHON_SCRIPT
+
+      - name: Update job status → clipping
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "clipping", "progress": 50}'
 
       # ─────────────────────────────────────────────────────────────
-      # 6. FFmpeg — Split Video into Clips
+      # 6. FFmpeg — Split Video into Clips + Python SRT slicing
       # ─────────────────────────────────────────────────────────────
       - name: Split video into clips
         run: |
           echo "✂️ Splitting video into clips..."
-          
+
           python3 << 'PYTHON'
-          import json, subprocess, os
-          
-          with open('workspace/clips/viral_moments.json') as f:
+          import json, subprocess, re
+
+          with open("workspace/clips/viral_moments.json") as f:
               data = json.loads(f.read())
-          
-          # Handle both {"clips": [...]} and [...] formats
-          moments = data.get('clips', data) if isinstance(data, dict) else data
-          
+
+          moments = data.get("clips", data) if isinstance(data, dict) else data
+
+          # Read full SRT for slicing
+          with open("workspace/audio/full_transcript.srt") as f:
+              full_srt = f.read()
+
+          def parse_srt_time(time_str):
+              """Convert SRT timestamp to seconds."""
+              h, m, rest = time_str.strip().split(":")
+              s, ms = rest.split(",")
+              return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+          def format_srt_time(seconds):
+              """Convert seconds to SRT timestamp."""
+              h = int(seconds // 3600)
+              m = int((seconds % 3600) // 60)
+              s = int(seconds % 60)
+              ms = int((seconds % 1) * 1000)
+              return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+          def slice_srt(srt_text, start_sec, end_sec):
+              """Extract SRT entries within a time range, re-indexed."""
+              blocks = re.split(r'\n\n+', srt_text.strip())
+              result = []
+              idx = 1
+              for block in blocks:
+                  lines = block.strip().split('\n')
+                  if len(lines) < 3:
+                      continue
+                  time_line = lines[1] if '-->' in lines[1] else (lines[0] if '-->' in lines[0] else None)
+                  if not time_line:
+                      continue
+                  parts = time_line.split('-->')
+                  try:
+                      t_start = parse_srt_time(parts[0])
+                      t_end = parse_srt_time(parts[1])
+                  except:
+                      continue
+                  if t_start >= start_sec and t_end <= end_sec:
+                      new_start = format_srt_time(t_start - start_sec)
+                      new_end = format_srt_time(t_end - start_sec)
+                      text = '\n'.join(lines[2:]) if '-->' in lines[1] else '\n'.join(lines[1:])
+                      result.append(f"{idx}\n{new_start} --> {new_end}\n{text}")
+                      idx += 1
+              return '\n\n'.join(result)
+
           for i, moment in enumerate(moments):
-              start = float(moment['start_time'])
-              end = float(moment['end_time'])
+              start = float(moment["start_time"])
+              end = float(moment["end_time"])
               duration = end - start
-              
+
               # Enforce min 15s, max 60s clips
               if duration < 15:
                   end = start + 15
@@ -228,36 +348,45 @@ jobs:
               elif duration > 60:
                   end = start + 60
                   duration = 60
-              
+
               output = f"workspace/clips/clip_{i:03d}.mp4"
-              
+
               cmd = [
-                  'ffmpeg', '-i', 'workspace/source/source.mp4',
-                  '-ss', str(start), '-t', str(duration),
-                  '-c:v', 'libx264', '-preset', 'fast',
-                  '-c:a', 'aac', '-b:a', '128k',
-                  '-movflags', '+faststart',
-                  output, '-y', '-loglevel', 'warning'
+                  "ffmpeg", "-i", "workspace/source/source.mp4",
+                  "-ss", str(start), "-t", str(duration),
+                  "-c:v", "libx264", "-preset", "fast",
+                  "-c:a", "aac", "-b:a", "128k",
+                  "-movflags", "+faststart",
+                  output, "-y", "-loglevel", "warning"
               ]
-              
+
               subprocess.run(cmd, check=True)
               print(f"  ✅ Clip {i}: {start:.1f}s → {end:.1f}s ({duration:.1f}s)")
-              
-              # Extract clip-specific SRT
-              srt_cmd = [
-                  'ffmpeg', '-i', 'workspace/audio/full_transcript.srt',
-                  '-ss', str(start), '-t', str(duration),
-                  f'workspace/clips/clip_{i:03d}.srt',
-                  '-y', '-loglevel', 'warning'
-              ]
-              # SRT extraction may fail — will fall back to full transcript
-              try:
-                  subprocess.run(srt_cmd, check=True)
-              except:
-                  pass
-          
+
+              # Extract clip-specific SRT using Python
+              clip_srt = slice_srt(full_srt, start, end)
+              if clip_srt.strip():
+                  with open(f"workspace/clips/clip_{i:03d}.srt", "w") as f:
+                      f.write(clip_srt)
+
+          # Save moment metadata for later Supabase insert
+          with open("workspace/clips/moments_metadata.json", "w") as f:
+              json.dump(moments, f, indent=2)
+
           print(f"✅ Split into {len(moments)} clips")
           PYTHON
+
+      - name: Update job status → captioning
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "captioning", "progress": 65}'
 
       # ─────────────────────────────────────────────────────────────
       # 7. Remotion — Render Animated Captions
@@ -266,30 +395,49 @@ jobs:
         working-directory: remotion-captions
         run: |
           echo "🎬 Rendering animated captions with Remotion..."
-          
+
           STYLE="${{ inputs.caption_style }}"
-          
+
           for clip in ../workspace/clips/clip_*.mp4; do
             BASENAME=$(basename "$clip" .mp4)
             SRT_FILE="../workspace/clips/${BASENAME}.srt"
             OUTPUT="../workspace/captioned/${BASENAME}_captioned.mp4"
-            
-            # Use clip-specific SRT if available, otherwise use full transcript
+
+            # Check if SRT exists
             if [ -f "$SRT_FILE" ]; then
               SRT_CONTENT=$(cat "$SRT_FILE")
             else
-              SRT_CONTENT=$(cat ../workspace/audio/full_transcript.srt)
+              echo "  ⚠️ No SRT for $BASENAME, skipping captions — copying raw clip"
+              cp "$clip" "$OUTPUT"
+              continue
             fi
-            
+
+            # Write props to a temp JSON file (avoids shell escaping issues)
+            python3 -c "
+          import json
+          srt = open('../workspace/clips/${BASENAME}.srt').read()
+          props = {
+              'srtContent': srt,
+              'captionStyle': '$STYLE',
+              'backgroundColor': '#000000',
+              'accentColor': '#39E508',
+              'fontSize': 68
+          }
+          print(json.dumps(props))
+          " > /tmp/remotion_props.json
+
             echo "  Rendering $BASENAME with $STYLE style..."
-            
+
             npx remotion render CaptionedClip "$OUTPUT" \
-              --props="$(echo "{\"srtContent\": $(echo "$SRT_CONTENT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'), \"captionStyle\": \"$STYLE\", \"backgroundColor\": \"#000000\", \"accentColor\": \"#39E508\", \"fontSize\": 68}" )" \
+              --props="$(cat /tmp/remotion_props.json)" \
               --codec=h264 \
               --concurrency=2 \
-              --log=error || echo "⚠️ Failed to render $BASENAME"
+              --log=error || {
+                echo "  ⚠️ Remotion failed for $BASENAME — copying raw clip"
+                cp "$clip" "$OUTPUT"
+              }
           done
-          
+
           echo "✅ Caption rendering complete"
 
       # ─────────────────────────────────────────────────────────────
@@ -298,151 +446,219 @@ jobs:
       - name: Generate thumbnails
         run: |
           echo "🖼️ Generating thumbnails..."
-          
+
           for clip in workspace/captioned/*_captioned.mp4; do
+            [ -f "$clip" ] || continue
             BASENAME=$(basename "$clip" _captioned.mp4)
-            
+
             # Extract frame at 2 seconds as thumbnail
             ffmpeg -i "$clip" -ss 2 -vframes 1 \
               -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" \
               "workspace/thumbnails/${BASENAME}_thumb.jpg" \
-              -y -loglevel warning
+              -y -loglevel warning || true
           done
-          
+
           echo "✅ Thumbnails generated"
 
-      # ─────────────────────────────────────────────────────────────
-      # 9. Upload to Google Drive
-      # ─────────────────────────────────────────────────────────────
-      - name: Upload to Google Drive
-        env:
-          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-        run: |
-          echo "☁️ Uploading to Google Drive..."
-          
-          python3 << 'PYTHON'
-          import json, os
-          from google.oauth2 import service_account
-          from googleapiclient.discovery import build
-          from googleapiclient.http import MediaFileUpload
-          
-          # Auth
-          key_json = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_KEY'])
-          creds = service_account.Credentials.from_service_account_info(
-              key_json, scopes=['https://www.googleapis.com/auth/drive.file']
-          )
-          drive = build('drive', 'v3', credentials=creds)
-          
-          folder_id = os.environ['GDRIVE_FOLDER_ID']
-          job_id = "${{ inputs.job_id }}"
-          
-          # Create job subfolder
-          job_folder = drive.files().create(body={
-              'name': f'ClipMint-{job_id}',
-              'mimeType': 'application/vnd.google-apps.folder',
-              'parents': [folder_id]
-          }).execute()
-          job_folder_id = job_folder['id']
-          
-          uploaded = []
-          
-          # Upload captioned clips
-          for f in sorted(os.listdir('workspace/captioned')):
-              if not f.endswith('.mp4'): continue
-              path = f'workspace/captioned/{f}'
-              media = MediaFileUpload(path, mimetype='video/mp4', resumable=True)
-              file = drive.files().create(
-                  body={'name': f, 'parents': [job_folder_id]},
-                  media_body=media
-              ).execute()
-              
-              # Make publicly accessible
-              drive.permissions().create(
-                  fileId=file['id'],
-                  body={'type': 'anyone', 'role': 'reader'}
-              ).execute()
-              
-              url = f"https://drive.google.com/file/d/{file['id']}/view"
-              uploaded.append({'name': f, 'url': url, 'id': file['id']})
-              print(f"  ✅ Uploaded: {f}")
-          
-          # Upload thumbnails
-          for f in sorted(os.listdir('workspace/thumbnails')):
-              if not f.endswith('.jpg'): continue
-              path = f'workspace/thumbnails/{f}'
-              media = MediaFileUpload(path, mimetype='image/jpeg')
-              file = drive.files().create(
-                  body={'name': f, 'parents': [job_folder_id]},
-                  media_body=media
-              ).execute()
-              drive.permissions().create(
-                  fileId=file['id'],
-                  body={'type': 'anyone', 'role': 'reader'}
-              ).execute()
-          
-          # Save upload manifest
-          with open('workspace/upload_manifest.json', 'w') as f:
-              json.dump({'job_id': job_id, 'folder_id': job_folder_id, 'clips': uploaded}, f, indent=2)
-          
-          print(f"✅ All files uploaded to folder: {job_folder_id}")
-          PYTHON
-
-      # ─────────────────────────────────────────────────────────────
-      # 10. Update Supabase Job Status
-      # ─────────────────────────────────────────────────────────────
-      - name: Update job status
+      - name: Update job status → uploading
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          echo "📊 Updating job status in Supabase..."
-          
-          MANIFEST=$(cat workspace/upload_manifest.json)
-          CLIPS_COUNT=$(echo "$MANIFEST" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['clips']))")
-          
-          # Update job status to 'done'
           curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
             -H "apikey: $SUPABASE_SERVICE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "{
-              \"status\": \"done\",
-              \"clips_count\": $CLIPS_COUNT,
-              \"drive_folder_id\": $(echo "$MANIFEST" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['folder_id']))"),
-              \"completed_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
-            }"
-          
-          # Insert clip records
-          echo "$MANIFEST" | python3 -c "
-          import sys, json, subprocess
-          data = json.load(sys.stdin)
-          for i, clip in enumerate(data['clips']):
-              body = json.dumps({
-                  'job_id': data['job_id'],
-                  'clip_index': i,
-                  'filename': clip['name'],
-                  'drive_file_id': clip['id'],
-                  'drive_url': clip['url'],
-                  'status': 'ready'
-              })
-              subprocess.run([
-                  'curl', '-s', '-X', 'POST',
-                  '${{ env.SUPABASE_URL }}/rest/v1/clips',
-                  '-H', 'apikey: ${{ env.SUPABASE_SERVICE_KEY }}',
-                  '-H', 'Authorization: Bearer ${{ env.SUPABASE_SERVICE_KEY }}',
-                  '-H', 'Content-Type: application/json',
-                  '-H', 'Prefer: return=minimal',
-                  '-d', body
-              ], check=True)
-          print(f'✅ Inserted {len(data[\"clips\"])} clip records')
-          "
-          
-          echo "✅ Job status updated"
+            -d '{"status": "uploading", "progress": 80}'
 
       # ─────────────────────────────────────────────────────────────
-      # 11. Send Notification
+      # 9. Upload to Google Drive via rclone
+      # ─────────────────────────────────────────────────────────────
+      - name: Setup rclone config
+        env:
+          RCLONE_CONF_B64: ${{ secrets.RCLONE_CONF_B64 }}
+        run: |
+          echo "🔧 Setting up rclone..."
+          mkdir -p ~/.config/rclone
+          echo "$RCLONE_CONF_B64" | base64 -d > ~/.config/rclone/rclone.conf
+          echo "✅ rclone configured"
+
+      - name: Upload to Google Drive
+        env:
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          echo "☁️ Uploading to Google Drive..."
+
+          JOB_ID="${{ inputs.job_id }}"
+          REMOTE_NAME=$(rclone listremotes | head -1 | tr -d ':')
+
+          # Upload captioned clips to Drive folder
+          rclone copy workspace/captioned/ \
+            "${REMOTE_NAME}:ClipMint/${JOB_ID}/clips/" \
+            --drive-root-folder-id="$GDRIVE_FOLDER_ID" \
+            -v
+
+          # Upload thumbnails
+          rclone copy workspace/thumbnails/ \
+            "${REMOTE_NAME}:ClipMint/${JOB_ID}/thumbnails/" \
+            --drive-root-folder-id="$GDRIVE_FOLDER_ID" \
+            -v
+
+          # Build upload manifest (list uploaded files with Drive links)
+          python3 << PYEOF
+          import json, subprocess, os
+
+          job_id = "$JOB_ID"
+          remote = "${REMOTE_NAME}"
+          folder_id = os.environ["GDRIVE_FOLDER_ID"]
+
+          # List uploaded clips
+          result = subprocess.run(
+              ["rclone", "lsjson", f"{remote}:ClipMint/{job_id}/clips/",
+               f"--drive-root-folder-id={folder_id}"],
+              capture_output=True, text=True
+          )
+
+          clips = []
+          if result.returncode == 0:
+              files = json.loads(result.stdout)
+              for f in files:
+                  if f["Name"].endswith(".mp4"):
+                      file_id = f.get("ID", "")
+                      clips.append({
+                          "name": f["Name"],
+                          "url": f"https://drive.google.com/file/d/{file_id}/view" if file_id else "",
+                          "id": file_id
+                      })
+
+          manifest = {"job_id": job_id, "folder_id": folder_id, "clips": clips}
+          with open("workspace/upload_manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+
+          print(f"✅ Uploaded {len(clips)} clips to Google Drive")
+          PYEOF
+
+      # ─────────────────────────────────────────────────────────────
+      # 10. Update Supabase Job Status + Insert Clip Records
+      # ─────────────────────────────────────────────────────────────
+      - name: Update job status → done + insert clips
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "📊 Updating job status in Supabase..."
+
+          python3 << 'PYTHON'
+          import json, requests, os
+
+          supabase_url = os.environ["SUPABASE_URL"]
+          service_key = os.environ["SUPABASE_SERVICE_KEY"]
+          job_id = "${{ inputs.job_id }}"
+
+          headers = {
+              "apikey": service_key,
+              "Authorization": f"Bearer {service_key}",
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal"
+          }
+
+          # Load manifests
+          with open("workspace/upload_manifest.json") as f:
+              manifest = json.load(f)
+
+          moments = []
+          try:
+              with open("workspace/clips/moments_metadata.json") as f:
+                  moments = json.load(f)
+          except:
+              pass
+
+          clips = manifest.get("clips", [])
+          clips_count = len(clips)
+
+          # Get user_id from the job
+          job_resp = requests.get(
+              f"{supabase_url}/rest/v1/jobs?id=eq.{job_id}&select=user_id",
+              headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"}
+          )
+          jobs = job_resp.json()
+          user_id = jobs[0]["user_id"] if jobs else None
+
+          if not user_id:
+              print("❌ Could not find job user_id")
+              exit(1)
+
+          # Update job status to done
+          from datetime import datetime, timezone
+          now = datetime.now(timezone.utc).isoformat()
+
+          requests.patch(
+              f"{supabase_url}/rest/v1/jobs?id=eq.{job_id}",
+              headers=headers,
+              json={
+                  "status": "done",
+                  "progress": 100,
+                  "clips_count": clips_count,
+                  "drive_folder_id": manifest.get("folder_id", ""),
+                  "completed_at": now
+              }
+          )
+          print(f"✅ Job updated: status=done, clips_count={clips_count}")
+
+          # Insert clip records with user_id
+          for i, clip in enumerate(clips):
+              moment = moments[i] if i < len(moments) else {}
+
+              clip_data = {
+                  "job_id": job_id,
+                  "user_id": user_id,
+                  "clip_index": i,
+                  "filename": clip["name"],
+                  "drive_file_id": clip.get("id", ""),
+                  "drive_url": clip.get("url", ""),
+                  "title": moment.get("title", f"Clip {i+1}"),
+                  "description": moment.get("description", ""),
+                  "hashtags": moment.get("hashtags", []),
+                  "hook_caption": moment.get("hook", ""),
+                  "viral_score": moment.get("viral_score", 50),
+                  "start_time": moment.get("start_time", 0),
+                  "end_time": moment.get("end_time", 0),
+                  "status": "ready"
+              }
+
+              resp = requests.post(
+                  f"{supabase_url}/rest/v1/clips",
+                  headers=headers,
+                  json=clip_data
+              )
+              if resp.status_code in [200, 201]:
+                  print(f"  ✅ Clip {i}: {clip['name']}")
+              else:
+                  print(f"  ⚠️ Clip {i} insert failed: {resp.status_code} {resp.text}")
+
+          print(f"✅ Inserted {clips_count} clip records into Supabase")
+          PYTHON
+
+      # ─────────────────────────────────────────────────────────────
+      # 11. Error Handling — Mark Failed on Error
+      # ─────────────────────────────────────────────────────────────
+      - name: Mark job as failed on error
+        if: failure()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "❌ Pipeline failed — updating job status..."
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "failed", "error_message": "Pipeline failed. Check GitHub Actions logs.", "progress": 0}'
+
+      # ─────────────────────────────────────────────────────────────
+      # 12. Send Notification
       # ─────────────────────────────────────────────────────────────
       - name: Send completion notification
         if: always()
@@ -451,7 +667,7 @@ jobs:
         run: |
           STATUS="${{ job.status }}"
           JOB_ID="${{ inputs.job_id }}"
-          
+
           if [ "$STATUS" = "success" ]; then
             EMOJI="✅"
             MSG="ClipMint job **$JOB_ID** completed successfully!"
@@ -459,7 +675,7 @@ jobs:
             EMOJI="❌"
             MSG="ClipMint job **$JOB_ID** failed. Check GitHub Actions logs."
           fi
-          
+
           if [ -n "$DISCORD_WEBHOOK" ]; then
             curl -s -X POST "$DISCORD_WEBHOOK" \
               -H "Content-Type: application/json" \

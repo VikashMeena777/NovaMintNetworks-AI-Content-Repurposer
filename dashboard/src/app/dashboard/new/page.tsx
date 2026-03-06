@@ -59,6 +59,22 @@ export default function NewVideoPage() {
         }
 
         if (data) {
+            // Trigger the processing pipeline (GitHub Actions)
+            try {
+                await fetch("/api/trigger-pipeline", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        job_id: data.id,
+                        video_url: videoUrl.trim(),
+                        caption_style: captionStyle,
+                        max_clips: maxClips,
+                    }),
+                });
+            } catch (triggerErr) {
+                console.warn("Pipeline trigger failed:", triggerErr);
+                // Don't block navigation — job is created, pipeline can be retried
+            }
             router.push(`/dashboard/${data.id}`);
         }
     };

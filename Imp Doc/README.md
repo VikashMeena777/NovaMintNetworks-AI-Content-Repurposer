@@ -17,12 +17,10 @@
 ├── dashboard/               # Next.js 14 dashboard
 │   ├── src/app/
 │   │   ├── page.tsx            # Landing page (hero, pricing, styles)
-│   │   ├── api/
-│   │   │   └── trigger-pipeline/ # Server-side GitHub Actions dispatch
 │   │   └── dashboard/
 │   │       ├── layout.tsx      # Sidebar navigation
 │   │       ├── page.tsx        # Jobs list
-│   │       ├── new/page.tsx    # Upload form + pipeline trigger
+│   │       ├── new/page.tsx    # Upload form
 │   │       ├── [jobId]/page.tsx # Job detail + clips
 │   │       ├── analytics/      # Usage analytics
 │   │       ├── api-keys/       # API key management
@@ -34,10 +32,9 @@
 │   ├── src/index.ts            # Main router (5 endpoints)
 │   └── wrangler.toml           # Worker config
 ├── supabase/
-│   ├── schema.sql              # Database schema (4 tables + RLS)
-│   └── migration_phase4.sql    # increment_videos_used RPC function
+│   └── schema.sql              # Database schema (4 tables + RLS)
 ├── .github/workflows/
-│   ├── process-video.yml       # Main pipeline (12 steps)
+│   ├── process-video.yml       # Main pipeline (11 steps)
 │   └── health-check.yml       # Daily cron health check
 └── README.md
 ```
@@ -70,8 +67,7 @@ npx wrangler deploy # Deploy to Cloudflare
 ### 4. Database
 1. Create a Supabase project at [supabase.com](https://supabase.com)
 2. Run `supabase/schema.sql` in the SQL Editor
-3. Run `supabase/migration_phase4.sql` for the RPC function
-4. Add your Supabase URL and keys to `dashboard/.env.local`
+3. Add your Supabase URL and keys to `dashboard/.env.local`
 
 ## Caption Styles (9 Available)
 
@@ -104,8 +100,8 @@ npx wrangler deploy # Deploy to Cloudflare
 - **Cloudflare Workers** — API gateway
 - **Supabase** — Auth + PostgreSQL database
 - **GitHub Actions** — Video processing pipeline
-- **Groq** — Whisper transcription + LLaMA 3.3 for AI analysis
-- **Google Drive** — Video storage (via rclone)
+- **Groq** — LLaMA 3.3 for AI analysis + Whisper transcription
+- **Google Drive** — Video storage
 - **FFmpeg** — Video processing
 
 ## Pricing (INR)
