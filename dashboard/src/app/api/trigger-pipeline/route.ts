@@ -50,69 +50,81 @@ export async function POST(request: NextRequest) {
     const githubRepo = process.env.GITHUB_REPO;
 
     if (!githubToken || !githubRepo) {
-        // If GitHub integration isn't configured, just leave the job queued
         console.warn("GITHUB_TOKEN or GITHUB_REPO not set — pipeline not triggered");
+
+        const missing = [];
+        if (!githubToken) missing.push("GITHUB_TOKEN");
+        if (!githubRepo) missing.push("GITHUB_REPO");
+
+        await supabase
+            .from("jobs")
+            .update({
+                status: "failed",
+                error_message: `Pipeline not configured: missing env vars: ${missing.join(", ")}`,
+            })
+            .eq("id", job_id);
+
         return NextResponse.json({
             triggered: false,
-            message: "Pipeline trigger not configured. Job created but processing not started.",
-        });
+            message: `Pipeline trigger not configured. Missing: ${missing.join(", ")}`,
+        }, { status: 500 });
     }
 
+    const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/process-video.yml/dispatches`;
+
     try {
-        const dispatchRes = await fetch(
-            `https://api.github.com/repos/${githubRepo}/actions/workflows/process-video.yml/dispatches`,
-            {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${githubToken}`,
-                    Accept: "application/vnd.github.v3+json",
-                    "Content-Type": "application/json",
+        const dispatchRes = await fetch(dispatchUrl, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${githubToken}`,
+                Accept: "application/vnd.github.v3+json",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                ref: "main",
+                inputs: {
+                    job_id: job_id,
+                    video_url: video_url,
+                    caption_style: caption_style || "hormozi",
+                    max_clips: String(max_clips || 10),
                 },
-                body: JSON.stringify({
-                    ref: "main",
-                    inputs: {
-                        job_id: job_id,
-                        video_url: video_url,
-                        caption_style: caption_style || "hormozi",
-                        max_clips: String(max_clips || 10),
-                    },
-                }),
-            }
-        );
+            }),
+        });
 
         if (!dispatchRes.ok) {
             const errText = await dispatchRes.text();
-            console.error("GitHub dispatch failed:", dispatchRes.status, errText);
+            const errDetail = `GitHub API ${dispatchRes.status}: ${errText.slice(0, 500)}`;
+            console.error("GitHub dispatch failed:", errDetail, "URL:", dispatchUrl);
 
-            // Mark job as failed
             await supabase
                 .from("jobs")
                 .update({
                     status: "failed",
-                    error_message: "Failed to trigger processing pipeline",
+                    error_message: errDetail,
                 })
                 .eq("id", job_id);
 
             return NextResponse.json(
-                { error: "Failed to trigger processing pipeline" },
+                { error: errDetail },
                 { status: 500 }
             );
         }
 
         return NextResponse.json({ triggered: true, job_id });
     } catch (err) {
-        console.error("Pipeline trigger error:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("Pipeline trigger error:", errMsg);
 
         await supabase
             .from("jobs")
             .update({
                 status: "failed",
-                error_message: "Failed to trigger processing pipeline",
+                error_message: `Trigger exception: ${errMsg}`,
             })
             .eq("id", job_id);
 
         return NextResponse.json(
-            { error: "Failed to trigger processing pipeline" },
+            { error: `Trigger exception: ${errMsg}` },
             { status: 500 }
         );
     }
