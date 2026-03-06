@@ -93,16 +93,33 @@ jobs:
       # ─────────────────────────────────────────────────────────────
       - name: Download video
         id: download
+        env:
+          YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
         run: |
           mkdir -p workspace/source workspace/audio workspace/clips workspace/captioned workspace/thumbnails
 
           echo "📥 Downloading video from: ${{ inputs.video_url }}"
+
+          # Set up YouTube cookies if provided (bypasses bot detection)
+          COOKIE_ARG=""
+          if [ -n "$YOUTUBE_COOKIES_B64" ]; then
+            echo "$YOUTUBE_COOKIES_B64" | base64 -d > /tmp/yt_cookies.txt
+            COOKIE_ARG="--cookies /tmp/yt_cookies.txt"
+            echo "🍪 Using YouTube cookies for authentication"
+          fi
+
+          # Use Node.js as JS runtime (already installed) to fix missing JS runtime warning
+          NODE_PATH=$(which node)
+
           yt-dlp \
             --format "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
             --merge-output-format mp4 \
             --output "workspace/source/source.mp4" \
             --no-playlist \
             --socket-timeout 30 \
+            --extractor-args "youtube:player_client=android,web" \
+            --js-runtimes "nodejs:$NODE_PATH" \
+            $COOKIE_ARG \
             "${{ inputs.video_url }}"
 
           # Get video duration
