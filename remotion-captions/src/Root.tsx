@@ -2,6 +2,27 @@ import React from "react";
 import { Composition } from "remotion";
 import { CaptionedClip, captionedClipSchema } from "./CaptionedClip";
 
+// Default Caption[] for Remotion Studio preview (10 seconds, ~20 words)
+const PREVIEW_CAPTIONS = JSON.stringify([
+    { text: "Welcome", startMs: 500, endMs: 900, timestampMs: null, confidence: null },
+    { text: "to", startMs: 950, endMs: 1100, timestampMs: null, confidence: null },
+    { text: "ClipMint", startMs: 1150, endMs: 1900, timestampMs: null, confidence: null },
+    { text: "The", startMs: 2500, endMs: 2700, timestampMs: null, confidence: null },
+    { text: "AI", startMs: 2750, endMs: 3000, timestampMs: null, confidence: null },
+    { text: "Content", startMs: 3050, endMs: 3400, timestampMs: null, confidence: null },
+    { text: "Repurposer", startMs: 3450, endMs: 4200, timestampMs: null, confidence: null },
+    { text: "Turn", startMs: 5000, endMs: 5300, timestampMs: null, confidence: null },
+    { text: "one", startMs: 5350, endMs: 5500, timestampMs: null, confidence: null },
+    { text: "video", startMs: 5550, endMs: 5900, timestampMs: null, confidence: null },
+    { text: "into", startMs: 5950, endMs: 6200, timestampMs: null, confidence: null },
+    { text: "ten", startMs: 6250, endMs: 6500, timestampMs: null, confidence: null },
+    { text: "viral", startMs: 6550, endMs: 6900, timestampMs: null, confidence: null },
+    { text: "clips", startMs: 6950, endMs: 7500, timestampMs: null, confidence: null },
+    { text: "Powered", startMs: 8000, endMs: 8400, timestampMs: null, confidence: null },
+    { text: "by", startMs: 8450, endMs: 8600, timestampMs: null, confidence: null },
+    { text: "Remotion", startMs: 8650, endMs: 9200, timestampMs: null, confidence: null },
+]);
+
 export const RemotionRoot: React.FC = () => {
     return (
         <>
@@ -14,45 +35,7 @@ export const RemotionRoot: React.FC = () => {
                 height={1920}
                 schema={captionedClipSchema}
                 defaultProps={{
-                    srtContent: `1
-00:00:00,500 --> 00:00:02,000
-Welcome to ClipMint
-
-2
-00:00:02,500 --> 00:00:05,000
-The AI Content Repurposer
-
-3
-00:00:05,500 --> 00:00:08,000
-Turn one video into ten clips
-
-4
-00:00:08,500 --> 00:00:11,000
-With professional animated captions
-
-5
-00:00:11,500 --> 00:00:14,000
-Powered by Remotion
-
-6
-00:00:14,500 --> 00:00:17,000
-Choose from multiple caption styles
-
-7
-00:00:17,500 --> 00:00:20,000
-Hormozi style word highlights
-
-8
-00:00:20,500 --> 00:00:23,000
-Bouncing text animations
-
-9
-00:00:23,500 --> 00:00:26,000
-Glitch and neon effects
-
-10
-00:00:26,500 --> 00:00:29,000
-Start repurposing your content today`,
+                    captionsData: PREVIEW_CAPTIONS,
                     captionStyle: "hormozi",
                     backgroundColor: "#000000",
                     accentColor: "#39E508",
@@ -69,13 +52,15 @@ Start repurposing your content today`,
                 height={1920}
                 schema={captionedClipSchema}
                 defaultProps={{
-                    srtContent: `1
-00:00:00,500 --> 00:00:02,500
-This is a preview of animated captions
-
-2
-00:00:03,000 --> 00:00:05,000
-Each word highlights as it plays`,
+                    captionsData: JSON.stringify([
+                        { text: "This", startMs: 500, endMs: 800, timestampMs: null, confidence: null },
+                        { text: "is", startMs: 850, endMs: 1000, timestampMs: null, confidence: null },
+                        { text: "a", startMs: 1050, endMs: 1200, timestampMs: null, confidence: null },
+                        { text: "preview", startMs: 1250, endMs: 1700, timestampMs: null, confidence: null },
+                        { text: "of", startMs: 1750, endMs: 1900, timestampMs: null, confidence: null },
+                        { text: "animated", startMs: 1950, endMs: 2400, timestampMs: null, confidence: null },
+                        { text: "captions", startMs: 2450, endMs: 3000, timestampMs: null, confidence: null },
+                    ]),
                     captionStyle: "hormozi",
                     backgroundColor: "#0a0a0a",
                     accentColor: "#FF6B35",

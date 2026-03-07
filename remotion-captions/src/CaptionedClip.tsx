@@ -9,14 +9,17 @@ import {
 } from "remotion";
 import { z } from "zod";
 import { zColor } from "@remotion/zod-types";
-import { parseSrtContent, type SrtEntry } from "./utils/parseCaptions";
+import { createTikTokStyleCaptions, type Caption } from "@remotion/captions";
 
 // ---------------------------------------------------------------------------
 // Schema — defines the props that can be set from Remotion Studio inspector
 // ---------------------------------------------------------------------------
 export const captionedClipSchema = z.object({
-    /** Raw SRT content string (will be parsed into captions) */
-    srtContent: z.string(),
+    /**
+     * JSON string of Caption[] — per-word timestamps from Groq verbose_json.
+     * Shape: [{ text, startMs, endMs, timestampMs, confidence }, ...]
+     */
+    captionsData: z.string(),
     /** Caption style preset name */
     captionStyle: z.enum([
         "hormozi",
@@ -43,16 +46,35 @@ export type CaptionedClipProps = z.infer<typeof captionedClipSchema>;
 // Main Composition
 // ---------------------------------------------------------------------------
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
-    srtContent,
+    captionsData,
     captionStyle,
     backgroundColor,
     accentColor,
     fontSize,
 }) => {
-    const { fps, width, height } = useVideoConfig();
+    const { width, height, fps } = useVideoConfig();
+    const frame = useCurrentFrame();
 
-    // Parse the SRT content into structured entries
-    const entries = useMemo(() => parseSrtContent(srtContent), [srtContent]);
+    // Parse Caption[] from JSON prop
+    const captions = useMemo<Caption[]>(() => {
+        try {
+            const parsed = JSON.parse(captionsData);
+            if (!Array.isArray(parsed)) return [];
+            return parsed as Caption[];
+        } catch {
+            return [];
+        }
+    }, [captionsData]);
+
+    // Create TikTok-style pages — each page = a short phrase shown together
+    const { pages } = useMemo(
+        () =>
+            createTikTokStyleCaptions({
+                captions,
+                combineTokensWithinMilliseconds: 1200,
+            }),
+        [captions]
+    );
 
     return (
         <AbsoluteFill
@@ -63,7 +85,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                 alignItems: "center",
             }}
         >
-            {/* Gradient background effect */}
+            {/* Radial vignette */}
             <AbsoluteFill
                 style={{
                     background: `radial-gradient(ellipse at center, ${backgroundColor}00 0%, ${backgroundColor} 70%)`,
@@ -86,26 +108,26 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                 CLIPMINT
             </div>
 
-            {/* Caption sequences */}
-            {entries.map((entry, index) => {
-                const startFrame = Math.round((entry.startMs / 1000) * fps);
-                const endFrame = Math.round((entry.endMs / 1000) * fps);
-                const durationInFrames = endFrame - startFrame;
-
-                if (durationInFrames <= 0) return null;
+            {/* Caption pages — each rendered as a Sequence */}
+            {pages.map((page, pageIndex) => {
+                const startFrame = Math.round((page.startMs / 1000) * fps);
+                const endFrame = Math.round(
+                    ((page.startMs + (page.durationMs ?? 2000)) / 1000) * fps
+                );
+                const durationInFrames = Math.max(1, endFrame - startFrame);
 
                 return (
                     <Sequence
-                        key={`caption-${index}`}
+                        key={`page-${pageIndex}`}
                         from={startFrame}
                         durationInFrames={durationInFrames}
                     >
-                        <CaptionRenderer
-                            text={entry.text}
+                        <PageRenderer
+                            page={page}
                             style={captionStyle}
                             accentColor={accentColor}
                             fontSize={fontSize}
-                            index={index}
+                            pageIndex={pageIndex}
                             width={width}
                         />
                     </Sequence>
@@ -116,49 +138,55 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Caption Renderer — routes to the correct style component
+// PageRenderer — routes to the correct style component
 // ---------------------------------------------------------------------------
-interface CaptionRendererProps {
-    text: string;
+interface TikTokPage {
+    startMs: number;
+    durationMs?: number;
+    tokens: Array<{ text: string; fromMs: number; toMs: number }>;
+}
+
+interface PageRendererProps {
+    page: TikTokPage;
     style: CaptionedClipProps["captionStyle"];
     accentColor: string;
     fontSize: number;
-    index: number;
+    pageIndex: number;
     width: number;
 }
 
-const CaptionRenderer: React.FC<CaptionRendererProps> = (props) => {
+const PageRenderer: React.FC<PageRendererProps> = (props) => {
     switch (props.style) {
         case "hormozi":
-            return <HormoziCaption {...props} />;
+            return <HormoziPage {...props} />;
         case "bounce":
-            return <BounceCaption {...props} />;
+            return <BouncePage {...props} />;
         case "fade":
-            return <FadeCaption {...props} />;
+            return <FadePage {...props} />;
         case "glow":
-            return <GlowCaption {...props} />;
+            return <GlowPage {...props} />;
         case "typewriter":
-            return <TypewriterCaption {...props} />;
+            return <TypewriterPage {...props} />;
         case "glitch":
-            return <GlitchCaption {...props} />;
+            return <GlitchPage {...props} />;
         case "neon":
-            return <NeonCaption {...props} />;
+            return <NeonPage {...props} />;
         case "colorful":
-            return <ColorfulCaption {...props} />;
+            return <ColorfulPage {...props} />;
         case "minimal":
-            return <MinimalCaption {...props} />;
+            return <MinimalPage {...props} />;
         default:
-            return <HormoziCaption {...props} />;
+            return <HormoziPage {...props} />;
     }
 };
 
 // ---------------------------------------------------------------------------
-// Shared wrapper for positioning captions in the lower third
+// Shared wrapper — positions captions in the lower third
 // ---------------------------------------------------------------------------
-const CaptionWrapper: React.FC<{
-    children: React.ReactNode;
-    width: number;
-}> = ({ children, width }) => (
+const CaptionWrapper: React.FC<{ children: React.ReactNode; width: number }> = ({
+    children,
+    width,
+}) => (
     <AbsoluteFill
         style={{
             justifyContent: "flex-end",
@@ -168,25 +196,34 @@ const CaptionWrapper: React.FC<{
             paddingRight: 60,
         }}
     >
-        <div style={{ maxWidth: width - 120, textAlign: "center" }}>
-            {children}
-        </div>
+        <div style={{ maxWidth: width - 120, textAlign: "center" }}>{children}</div>
     </AbsoluteFill>
 );
 
-// ===========================================================================
-// CAPTION STYLE 1: HORMOZI (word-by-word highlight)
-// ===========================================================================
-const HormoziCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    accentColor,
-    fontSize,
-    width,
-}) => {
+// ---------------------------------------------------------------------------
+// Helper: get active token index based on current playback position
+// ---------------------------------------------------------------------------
+function useActiveTokenIndex(page: TikTokPage): number {
     const frame = useCurrentFrame();
-    const { fps, durationInFrames } = useVideoConfig();
-    const words = text.split(" ");
-    const totalWords = words.length;
+    const { fps } = useVideoConfig();
+    // relFrame is the frame within this Sequence (starts at 0)
+    const absoluteMs = page.startMs + (frame / fps) * 1000;
+    let active = -1;
+    for (let i = 0; i < page.tokens.length; i++) {
+        if (absoluteMs >= page.tokens[i].fromMs) {
+            active = i;
+        }
+    }
+    return active;
+}
+
+// ===========================================================================
+// STYLE 1: HORMOZI — word-by-word highlight with real timestamps
+// ===========================================================================
+const HormoziPage: React.FC<PageRendererProps> = ({ page, accentColor, fontSize, width }) => {
+    const { fps } = useVideoConfig();
+    const frame = useCurrentFrame();
+    const activeIdx = useActiveTokenIndex(page);
 
     return (
         <CaptionWrapper width={width}>
@@ -198,14 +235,17 @@ const HormoziCaption: React.FC<CaptionRendererProps> = ({
                     gap: 12,
                 }}
             >
-                {words.map((word, i) => {
-                    // Each word gets highlighted in sequence
-                    const wordStart = (i / totalWords) * durationInFrames;
-                    const wordEnd = ((i + 1) / totalWords) * durationInFrames;
-                    const isActive = frame >= wordStart && frame < wordEnd;
-
+                {page.tokens.map((token, i) => {
+                    const isActive = i === activeIdx;
+                    const tokenStartFrame = Math.round(
+                        ((token.fromMs - page.startMs) / 1000) * fps
+                    );
                     const scale = isActive
-                        ? spring({ frame: frame - wordStart, fps, config: { stiffness: 300, damping: 20 } })
+                        ? spring({
+                            frame: Math.max(0, frame - tokenStartFrame),
+                            fps,
+                            config: { stiffness: 300, damping: 20 },
+                        })
                         : 1;
 
                     return (
@@ -224,10 +264,9 @@ const HormoziCaption: React.FC<CaptionRendererProps> = ({
                                 textShadow: isActive
                                     ? `0 0 30px ${accentColor}66, 0 4px 8px rgba(0,0,0,0.5)`
                                     : "0 4px 8px rgba(0,0,0,0.5)",
-                                transition: "color 0.1s",
                             }}
                         >
-                            {word}
+                            {token.text}
                         </span>
                     );
                 })}
@@ -237,23 +276,14 @@ const HormoziCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 2: BOUNCE
+// STYLE 2: BOUNCE
 // ===========================================================================
-const BounceCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    accentColor,
-    fontSize,
-    width,
-}) => {
+const BouncePage: React.FC<PageRendererProps> = ({ page, accentColor, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
+    const text = page.tokens.map((t) => t.text).join(" ");
 
-    const entrance = spring({
-        frame,
-        fps,
-        config: { stiffness: 200, damping: 12 },
-    });
-
+    const entrance = spring({ frame, fps, config: { stiffness: 200, damping: 12 } });
     const translateY = interpolate(entrance, [0, 1], [80, 0]);
     const scale = interpolate(entrance, [0, 1], [0.5, 1]);
 
@@ -279,15 +309,12 @@ const BounceCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 3: FADE
+// STYLE 3: FADE
 // ===========================================================================
-const FadeCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    fontSize,
-    width,
-}) => {
+const FadePage: React.FC<PageRendererProps> = ({ page, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { durationInFrames } = useVideoConfig();
+    const text = page.tokens.map((t) => t.text).join(" ");
 
     const opacity = interpolate(
         frame,
@@ -315,53 +342,57 @@ const FadeCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 4: GLOW
+// STYLE 4: GLOW (pulsing, with active-word highlight)
 // ===========================================================================
-const GlowCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    accentColor,
-    fontSize,
-    width,
-}) => {
+const GlowPage: React.FC<PageRendererProps> = ({ page, accentColor, fontSize, width }) => {
     const frame = useCurrentFrame();
     const pulse = Math.sin(frame * 0.15) * 0.3 + 0.7;
+    const activeIdx = useActiveTokenIndex(page);
 
     return (
         <CaptionWrapper width={width}>
-            <div
-                style={{
-                    fontSize,
-                    fontFamily: "'Inter', sans-serif",
-                    fontWeight: 800,
-                    color: accentColor,
-                    textShadow: `0 0 ${20 * pulse}px ${accentColor}, 0 0 ${40 * pulse}px ${accentColor}88, 0 0 ${60 * pulse}px ${accentColor}44`,
-                    textTransform: "uppercase",
-                }}
-            >
-                {text}
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 10 }}>
+                {page.tokens.map((token, i) => {
+                    const isActive = i === activeIdx;
+                    return (
+                        <span
+                            key={i}
+                            style={{
+                                fontSize,
+                                fontFamily: "'Inter', sans-serif",
+                                fontWeight: 800,
+                                color: isActive ? accentColor : "#FFFFFF",
+                                textShadow: isActive
+                                    ? `0 0 ${20 * pulse}px ${accentColor}, 0 0 ${40 * pulse}px ${accentColor}88`
+                                    : "0 4px 8px rgba(0,0,0,0.5)",
+                                textTransform: "uppercase",
+                                display: "inline-block",
+                            }}
+                        >
+                            {token.text}
+                        </span>
+                    );
+                })}
             </div>
         </CaptionWrapper>
     );
 };
 
 // ===========================================================================
-// CAPTION STYLE 5: TYPEWRITER
+// STYLE 5: TYPEWRITER
 // ===========================================================================
-const TypewriterCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    fontSize,
-    width,
-}) => {
+const TypewriterPage: React.FC<PageRendererProps> = ({ page, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { durationInFrames } = useVideoConfig();
+    const fullText = page.tokens.map((t) => t.text).join(" ");
 
     const charsToShow = Math.floor(
-        interpolate(frame, [0, durationInFrames * 0.6], [0, text.length], {
+        interpolate(frame, [0, durationInFrames * 0.6], [0, fullText.length], {
             extrapolateRight: "clamp",
         })
     );
 
-    const visibleText = text.slice(0, charsToShow);
+    const visibleText = fullText.slice(0, charsToShow);
     const showCursor = frame % 16 < 10;
 
     return (
@@ -378,25 +409,19 @@ const TypewriterCaption: React.FC<CaptionRendererProps> = ({
                 }}
             >
                 {visibleText}
-                {showCursor && (
-                    <span style={{ color: "#00FF88", opacity: 0.8 }}>▌</span>
-                )}
+                {showCursor && <span style={{ color: "#00FF88", opacity: 0.8 }}>▌</span>}
             </div>
         </CaptionWrapper>
     );
 };
 
 // ===========================================================================
-// CAPTION STYLE 6: GLITCH
+// STYLE 6: GLITCH
 // ===========================================================================
-const GlitchCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    accentColor,
-    fontSize,
-    width,
-}) => {
+const GlitchPage: React.FC<PageRendererProps> = ({ page, accentColor, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
+    const text = page.tokens.map((t) => t.text).join(" ");
 
     const entrance = spring({ frame, fps, config: { stiffness: 400, damping: 15 } });
     const glitchOffset = frame % 8 < 2 ? (Math.random() - 0.5) * 6 : 0;
@@ -404,7 +429,6 @@ const GlitchCaption: React.FC<CaptionRendererProps> = ({
     return (
         <CaptionWrapper width={width}>
             <div style={{ position: "relative" }}>
-                {/* Glitch layers */}
                 <div
                     style={{
                         position: "absolute",
@@ -435,7 +459,6 @@ const GlitchCaption: React.FC<CaptionRendererProps> = ({
                 >
                     {text}
                 </div>
-                {/* Main text */}
                 <div
                     style={{
                         fontSize,
@@ -455,15 +478,11 @@ const GlitchCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 7: NEON
+// STYLE 7: NEON
 // ===========================================================================
-const NeonCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    accentColor,
-    fontSize,
-    width,
-}) => {
+const NeonPage: React.FC<PageRendererProps> = ({ page, accentColor, fontSize, width }) => {
     const frame = useCurrentFrame();
+    const text = page.tokens.map((t) => t.text).join(" ");
     const flicker = frame < 6 ? (frame % 3 === 0 ? 0.3 : 1) : 1;
 
     return (
@@ -494,21 +513,17 @@ const NeonCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 8: COLORFUL (rainbow word-by-word)
+// STYLE 8: COLORFUL — rainbow word-by-word with real timing
 // ===========================================================================
 const RAINBOW_COLORS = [
     "#FF6B6B", "#FFA07A", "#FFD93D", "#6BCB77",
     "#4D96FF", "#9B59B6", "#FF6B9D", "#00D2FF",
 ];
 
-const ColorfulCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    fontSize,
-    width,
-}) => {
+const ColorfulPage: React.FC<PageRendererProps> = ({ page, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const words = text.split(" ");
+    const activeIdx = useActiveTokenIndex(page);
 
     return (
         <CaptionWrapper width={width}>
@@ -520,8 +535,11 @@ const ColorfulCaption: React.FC<CaptionRendererProps> = ({
                     gap: 10,
                 }}
             >
-                {words.map((word, i) => {
-                    const delay = i * 3;
+                {page.tokens.map((token, i) => {
+                    const tokenStartFrame = Math.round(
+                        ((token.fromMs - page.startMs) / 1000) * fps
+                    );
+                    const delay = Math.max(0, tokenStartFrame);
                     const entrance = spring({
                         frame: Math.max(0, frame - delay),
                         fps,
@@ -541,9 +559,11 @@ const ColorfulCaption: React.FC<CaptionRendererProps> = ({
                                 textShadow: "0 4px 8px rgba(0,0,0,0.4)",
                                 WebkitTextStroke: "1px rgba(0,0,0,0.3)",
                                 paintOrder: "stroke fill",
+                                // Dim words not yet spoken
+                                opacity: i <= activeIdx + 1 ? 1 : 0.5,
                             }}
                         >
-                            {word}
+                            {token.text}
                         </span>
                     );
                 })}
@@ -553,15 +573,12 @@ const ColorfulCaption: React.FC<CaptionRendererProps> = ({
 };
 
 // ===========================================================================
-// CAPTION STYLE 9: MINIMAL
+// STYLE 9: MINIMAL
 // ===========================================================================
-const MinimalCaption: React.FC<CaptionRendererProps> = ({
-    text,
-    fontSize,
-    width,
-}) => {
+const MinimalPage: React.FC<PageRendererProps> = ({ page, fontSize, width }) => {
     const frame = useCurrentFrame();
     const { fps, durationInFrames } = useVideoConfig();
+    const text = page.tokens.map((t) => t.text).join(" ");
 
     const entrance = spring({ frame, fps, config: { stiffness: 100, damping: 20 } });
     const exit = interpolate(

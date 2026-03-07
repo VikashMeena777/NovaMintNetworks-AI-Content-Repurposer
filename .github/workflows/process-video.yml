@@ -156,7 +156,7 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          echo "🗣️ Transcribing audio with Groq Whisper..."
+          echo "🗣️ Transcribing audio with Groq Whisper (verbose_json + word timestamps)..."
 
           # Split audio into 25MB chunks if needed (Groq limit)
           FILE_SIZE=$(stat --printf="%s" workspace/audio/audio.wav)
@@ -173,81 +173,97 @@ jobs:
             cp workspace/audio/audio.wav workspace/audio/chunk_000.wav
           fi
 
-          # Transcribe each chunk with timestamp offsetting
-          # FIX: Each chunk SRT starts at 00:00 but must be offset by chunk_index × segment_duration
-          > workspace/audio/full_transcript.srt
+          # Initialize empty captions array
+          echo '[]' > workspace/audio/full_captions.json
           CHUNK_INDEX=0
           TRANSCRIPTION_FAILED=0
 
           for chunk in workspace/audio/chunk_*.wav; do
             CHUNK_SIZE=$(stat --printf="%s" "$chunk")
-            echo "  Transcribing $chunk (size: ${CHUNK_SIZE} bytes, offset: $((CHUNK_INDEX * SEGMENT_DURATION))s)..."
+            OFFSET=$((CHUNK_INDEX * SEGMENT_DURATION))
+            echo "  Transcribing $chunk (size: ${CHUNK_SIZE} bytes, offset: ${OFFSET}s)..."
 
-            # Transcribe — capture HTTP status separately from response body
-            HTTP_STATUS=$(curl -s -o /tmp/chunk_raw.srt -w "%{http_code}" \
+            # Request verbose_json with word-level timestamps
+            HTTP_STATUS=$(curl -s -o /tmp/chunk_raw.json -w "%{http_code}" \
               -X POST "https://api.groq.com/openai/v1/audio/transcriptions" \
               -H "Authorization: Bearer $GROQ_API_KEY" \
               -F "file=@$chunk" \
               -F "model=whisper-large-v3-turbo" \
-              -F "response_format=srt" \
+              -F "response_format=verbose_json" \
+              -F "timestamp_granularities[]=word" \
               -F "language=en")
 
             echo "  Groq HTTP status: $HTTP_STATUS"
 
-            # Check HTTP status
             if [ "$HTTP_STATUS" != "200" ]; then
               echo "  ❌ Groq API error (HTTP $HTTP_STATUS):"
-              cat /tmp/chunk_raw.srt
+              cat /tmp/chunk_raw.json
               TRANSCRIPTION_FAILED=1
               break
             fi
 
-            # Validate response is SRT format (must contain ' --> ')
-            if ! grep -q ' --> ' /tmp/chunk_raw.srt; then
-              echo "  ❌ Groq response is not valid SRT format:"
-              cat /tmp/chunk_raw.srt
+            # Validate response has expected JSON structure
+            if ! python3 -c "import json,sys; d=json.load(open('/tmp/chunk_raw.json')); assert 'words' in d or 'segments' in d" 2>/dev/null; then
+              echo "  ❌ Groq response missing words/segments:"
+              cat /tmp/chunk_raw.json
               TRANSCRIPTION_FAILED=1
               break
             fi
 
-            SRT_LINES=$(wc -l < /tmp/chunk_raw.srt)
-            echo "  ✅ SRT received: ${SRT_LINES} lines"
-            echo "  First 5 lines of SRT:"
-            head -5 /tmp/chunk_raw.srt || true
+            # Convert verbose_json → Caption[] and append to full_captions.json
+            python3 - <<PYCONVERT
+          import json
 
-            # Offset timestamps by chunk_index × SEGMENT_DURATION using Python
-            OFFSET=$((CHUNK_INDEX * SEGMENT_DURATION))
-            python3 - <<PYOFFSET
-          import re, sys
+          offset = $OFFSET  # seconds, already an int from shell
 
-          offset = $OFFSET
-          srt = open('/tmp/chunk_raw.srt').read()
+          with open('/tmp/chunk_raw.json') as f:
+              data = json.load(f)
 
-          def shift_time(t, offset_sec):
-              h, m, rest = t.strip().split(':')
-              s, ms = rest.split(',')
-              total = int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000 + offset_sec
-              h2 = int(total // 3600)
-              m2 = int((total % 3600) // 60)
-              s2 = int(total % 60)
-              ms2 = int(round((total % 1) * 1000))
-              return f'{h2:02d}:{m2:02d}:{s2:02d},{ms2:03d}'
+          captions = []
 
-          def shift_srt(srt_text, offset_sec):
-              pattern = re.compile(
-                  r'(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})'
-              )
-              def replacer(m):
-                  return f'{shift_time(m.group(1), offset_sec)} --> {shift_time(m.group(2), offset_sec)}'
-              return pattern.sub(replacer, srt_text)
+          if 'words' in data and data['words']:
+              # Preferred: per-word timestamps
+              for w in data['words']:
+                  captions.append({
+                      'text': w.get('word', w.get('text', '')).strip(),
+                      'startMs': int((w['start'] + offset) * 1000),
+                      'endMs':   int((w['end']   + offset) * 1000),
+                      'timestampMs': None,
+                      'confidence': None
+                  })
+              print(f'  ✅ Word-level captions: {len(captions)} words')
+          elif 'segments' in data and data['segments']:
+              # Fallback: distribute each segment text evenly across its time range
+              for seg in data['segments']:
+                  words = seg['text'].strip().split()
+                  n = max(1, len(words))
+                  seg_start = seg['start'] + offset
+                  seg_end   = seg['end']   + offset
+                  dur = (seg_end - seg_start) / n
+                  for i, w in enumerate(words):
+                      captions.append({
+                          'text': w,
+                          'startMs': int((seg_start + i * dur) * 1000),
+                          'endMs':   int((seg_start + (i + 1) * dur) * 1000),
+                          'timestampMs': None,
+                          'confidence': None
+                      })
+              print(f'  ⚠️ Fallback segment distribution: {len(captions)} words')
+          else:
+              print('  ❌ No words or segments found in response')
+              exit(1)
 
-          result = shift_srt(srt, offset)
-          with open('/tmp/chunk_offset.srt', 'w') as f:
-              f.write(result)
-          PYOFFSET
+          if captions:
+              print(f'  First 3 words: {[c["text"] for c in captions[:3]]}')
 
-            cat /tmp/chunk_offset.srt >> workspace/audio/full_transcript.srt
-            echo "" >> workspace/audio/full_transcript.srt
+          # Merge into accumulator
+          with open('workspace/audio/full_captions.json') as f:
+              existing = json.load(f)
+          existing.extend(captions)
+          with open('workspace/audio/full_captions.json', 'w') as f:
+              json.dump(existing, f)
+          PYCONVERT
+
             CHUNK_INDEX=$((CHUNK_INDEX + 1))
           done
 
@@ -256,9 +272,9 @@ jobs:
             exit 1
           fi
 
-          TOTAL_SRT_LINES=$(wc -l < workspace/audio/full_transcript.srt)
-          echo "✅ Transcription complete ($(ls workspace/audio/chunk_*.wav | wc -l) chunks, ${TOTAL_SRT_LINES} SRT lines, timestamps offset)"
-          echo "srt_path=workspace/audio/full_transcript.srt" >> $GITHUB_OUTPUT
+          TOTAL_WORDS=$(python3 -c "import json; print(len(json.load(open('workspace/audio/full_captions.json'))))")
+          echo "✅ Transcription complete: ${TOTAL_WORDS} words across $(ls workspace/audio/chunk_*.wav | wc -l) chunk(s)"
+          echo "captions_path=workspace/audio/full_captions.json" >> $GITHUB_OUTPUT
 
       - name: Update job status → analyzing
         env:
@@ -291,30 +307,31 @@ jobs:
           max_clips = os.environ.get("MAX_CLIPS", "10")
           video_duration = float(os.environ.get("VIDEO_DURATION", "0") or "0")
 
-          with open("workspace/audio/full_transcript.srt") as f:
-              transcript = f.read()
+          import sys
 
-          print(f"📄 Transcript length: {len(transcript)} chars")
+          with open("workspace/audio/full_captions.json") as f:
+              captions = json.load(f)
 
-          # Check if transcript is empty OR is a JSON error response (not valid SRT)
-          is_empty = not transcript.strip()
-          is_json_error = transcript.strip().startswith('{') and '-->' not in transcript
+          print(f"📄 Caption words loaded: {len(captions)}")
 
-          if is_empty or is_json_error:
-              if is_json_error:
-                  print(f"❌ Transcript appears to be a JSON error response (not SRT): {transcript[:200]}")
-              else:
-                  print("❌ Empty transcript — cannot analyze")
-              # Fail loudly so we know the transcription step silently failed
+          # Check we have actual captions
+          if not captions:
+              print("❌ Empty captions — cannot analyze")
               exit(1)
+
+          # Build a plain-text transcript for the AI prompt
+          transcript = ' '.join(c['text'] for c in captions)
 
           duration_hint = f" The full video is {video_duration:.0f} seconds ({video_duration/60:.1f} minutes) long." if video_duration > 0 else ""
 
-          prompt = f"""Analyze this SRT transcript and find the top {max_clips} viral-worthy moments.{duration_hint}
+          # Limit transcript text sent to LLM (plain-text, not SRT)
+          transcript_preview = transcript[:8000]
+
+          prompt = f"""Analyze this transcript and find the top {max_clips} viral-worthy moments.{duration_hint}
 
           IMPORTANT: The clips MUST be spread across the ENTIRE video duration (0s to {video_duration:.0f}s).
           Do NOT cluster all clips at the start — find the best moments throughout the whole video.
-          Each clip must reference timestamps that actually appear in the transcript.
+          Each clip must reference actual spoken content from the transcript.
 
           For each moment, provide:
           - start_time: start timestamp in seconds (float, must be within video duration)
@@ -327,8 +344,8 @@ jobs:
 
           Return as JSON object with a "clips" key containing the array.
 
-          Transcript (first 8000 chars — clips should span the full video, not just this excerpt):
-          {transcript[:8000]}"""
+          Transcript (plain text, first 8000 chars — clips should span the full video):
+          {transcript_preview}"""
 
           response = requests.post(
               "https://api.groq.com/openai/v1/chat/completions",
@@ -380,57 +397,32 @@ jobs:
           echo "✂️ Splitting video into clips..."
 
           python3 << 'PYTHON'
-          import json, subprocess, re
+          import json, subprocess
 
           with open("workspace/clips/viral_moments.json") as f:
               data = json.loads(f.read())
 
           moments = data.get("clips", data) if isinstance(data, dict) else data
 
-          # Read full SRT for slicing
-          with open("workspace/audio/full_transcript.srt") as f:
-              full_srt = f.read()
+          # Load full Caption[] array
+          with open("workspace/audio/full_captions.json") as f:
+              full_captions = json.load(f)
 
-          def parse_srt_time(time_str):
-              """Convert SRT timestamp to seconds."""
-              h, m, rest = time_str.strip().split(":")
-              s, ms = rest.split(",")
-              return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
-
-          def format_srt_time(seconds):
-              """Convert seconds to SRT timestamp."""
-              h = int(seconds // 3600)
-              m = int((seconds % 3600) // 60)
-              s = int(seconds % 60)
-              ms = int((seconds % 1) * 1000)
-              return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-          def slice_srt(srt_text, start_sec, end_sec):
-              """Extract SRT entries within a time range, re-indexed."""
-              blocks = re.split(r'\n\n+', srt_text.strip())
+          def filter_captions(captions, start_sec, end_sec):
+              """Filter captions to a time window and re-zero timestamps to clip start."""
+              start_ms = int(start_sec * 1000)
+              end_ms   = int(end_sec   * 1000)
               result = []
-              idx = 1
-              for block in blocks:
-                  lines = block.strip().split('\n')
-                  if len(lines) < 3:
-                      continue
-                  time_line = lines[1] if '-->' in lines[1] else (lines[0] if '-->' in lines[0] else None)
-                  if not time_line:
-                      continue
-                  parts = time_line.split('-->')
-                  try:
-                      t_start = parse_srt_time(parts[0])
-                      t_end = parse_srt_time(parts[1])
-                  except:
-                      continue
-                  # FIX: include any subtitle that *starts* within the clip window
-                  if t_start >= (start_sec - 0.5) and t_start < end_sec:
-                      new_start = format_srt_time(t_start - start_sec)
-                      new_end = format_srt_time(t_end - start_sec)
-                      text = '\n'.join(lines[2:]) if '-->' in lines[1] else '\n'.join(lines[1:])
-                      result.append(f"{idx}\n{new_start} --> {new_end}\n{text}")
-                      idx += 1
-              return '\n\n'.join(result)
+              for c in captions:
+                  if c['startMs'] >= (start_ms - 500) and c['startMs'] < end_ms:
+                      result.append({
+                          'text': c['text'],
+                          'startMs': c['startMs'] - start_ms,
+                          'endMs':   min(c['endMs'] - start_ms, end_ms - start_ms),
+                          'timestampMs': None,
+                          'confidence': None
+                      })
+              return result
 
           for i, moment in enumerate(moments):
               start = float(moment["start_time"])
@@ -459,11 +451,14 @@ jobs:
               subprocess.run(cmd, check=True)
               print(f"  ✅ Clip {i}: {start:.1f}s → {end:.1f}s ({duration:.1f}s)")
 
-              # Extract clip-specific SRT using Python
-              clip_srt = slice_srt(full_srt, start, end)
-              if clip_srt.strip():
-                  with open(f"workspace/clips/clip_{i:03d}.srt", "w") as f:
-                      f.write(clip_srt)
+              # Filter Caption[] for this clip window and write .captions.json
+              clip_captions = filter_captions(full_captions, start, end)
+              if clip_captions:
+                  with open(f"workspace/clips/clip_{i:03d}.captions.json", "w") as f:
+                      json.dump(clip_captions, f)
+                  print(f"    📝 {len(clip_captions)} caption words written")
+              else:
+                  print(f"    ⚠️ No captions found for clip_{i:03d} ({start:.1f}s–{end:.1f}s)")
 
           # Save moment metadata for later Supabase insert
           with open("workspace/clips/moments_metadata.json", "w") as f:
@@ -496,14 +491,12 @@ jobs:
 
           for clip in ../workspace/clips/clip_*.mp4; do
             BASENAME=$(basename "$clip" .mp4)
-            SRT_FILE="../workspace/clips/${BASENAME}.srt"
+            CAPTIONS_FILE="../workspace/clips/${BASENAME}.captions.json"
             OUTPUT="../workspace/captioned/${BASENAME}_captioned.mp4"
 
-            # Check if SRT exists
-            if [ -f "$SRT_FILE" ]; then
-              SRT_CONTENT=$(cat "$SRT_FILE")
-            else
-              echo "  ⚠️ No SRT for $BASENAME, skipping captions — copying raw clip"
+            # Check if captions JSON exists
+            if [ ! -f "$CAPTIONS_FILE" ]; then
+              echo "  ⚠️ No captions for $BASENAME — copying raw clip"
               cp "$clip" "$OUTPUT"
               continue
             fi
@@ -511,9 +504,9 @@ jobs:
             # Write props to a temp JSON file (avoids shell escaping issues)
             python3 -c "
           import json
-          srt = open('../workspace/clips/${BASENAME}.srt').read()
+          captions = open('../workspace/clips/${BASENAME}.captions.json').read()
           props = {
-              'srtContent': srt,
+              'captionsData': captions,
               'captionStyle': '$STYLE',
               'backgroundColor': '#000000',
               'accentColor': '#39E508',
