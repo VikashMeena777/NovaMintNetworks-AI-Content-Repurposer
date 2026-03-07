@@ -2,7 +2,7 @@ import React from "react";
 import { Composition } from "remotion";
 import { CaptionedClip, captionedClipSchema } from "./CaptionedClip";
 
-// Default Caption[] for Remotion Studio preview (10 seconds, ~20 words)
+// Default Caption[] for Remotion Studio preview (10 seconds, ~17 words)
 const PREVIEW_CAPTIONS = JSON.stringify([
     { text: "Welcome", startMs: 500, endMs: 900, timestampMs: null, confidence: null },
     { text: "to", startMs: 950, endMs: 1100, timestampMs: null, confidence: null },
@@ -26,6 +26,16 @@ const PREVIEW_CAPTIONS = JSON.stringify([
 export const RemotionRoot: React.FC = () => {
     return (
         <>
+            {/*
+             * CaptionedClip — main production composition.
+             *
+             * `durationInFrames` defaults to 300 (10 s) here for Remotion Studio
+             * preview. The CI workflow always passes the actual clip duration via
+             * --props so every rendered clip gets the correct length.
+             *
+             * `calculateMetadata` reads `durationInFrames` from the incoming props
+             * and returns it as the composition length at render time.
+             */}
             <Composition
                 id="CaptionedClip"
                 component={CaptionedClip}
@@ -35,14 +45,22 @@ export const RemotionRoot: React.FC = () => {
                 height={1920}
                 schema={captionedClipSchema}
                 defaultProps={{
+                    videoSrc: "",
+                    durationInFrames: 300,
                     captionsData: PREVIEW_CAPTIONS,
                     captionStyle: "hormozi",
                     backgroundColor: "#000000",
                     accentColor: "#39E508",
                     fontSize: 68,
                 }}
+                calculateMetadata={({ props }) => {
+                    return {
+                        durationInFrames: props.durationInFrames ?? 300,
+                    };
+                }}
             />
 
+            {/* Quick preview composition — captions-only, fixed 5 s */}
             <Composition
                 id="CaptionPreview"
                 component={CaptionedClip}
@@ -52,6 +70,8 @@ export const RemotionRoot: React.FC = () => {
                 height={1920}
                 schema={captionedClipSchema}
                 defaultProps={{
+                    videoSrc: "",
+                    durationInFrames: 150,
                     captionsData: JSON.stringify([
                         { text: "This", startMs: 500, endMs: 800, timestampMs: null, confidence: null },
                         { text: "is", startMs: 850, endMs: 1000, timestampMs: null, confidence: null },

@@ -6,6 +6,8 @@ import {
     Sequence,
     interpolate,
     spring,
+    Video,
+    staticFile,
 } from "remotion";
 import { z } from "zod";
 import { zColor } from "@remotion/zod-types";
@@ -15,6 +17,18 @@ import { createTikTokStyleCaptions, type Caption } from "@remotion/captions";
 // Schema — defines the props that can be set from Remotion Studio inspector
 // ---------------------------------------------------------------------------
 export const captionedClipSchema = z.object({
+    /**
+     * Path or URL to the source video clip to display underneath the captions.
+     * Pass an absolute path or relative path that Remotion can resolve.
+     * Leave empty ("") to render captions-only on a solid background.
+     */
+    videoSrc: z.string().default(""),
+    /**
+     * Number of frames the composition should last. Must match the actual
+     * clip duration * fps (e.g. 30s clip at 30fps = 900 frames).
+     * Defaults to 300 (10 s) which is used by the Remotion Studio preview.
+     */
+    durationInFrames: z.number().int().min(1).default(300),
     /**
      * JSON string of Caption[] — per-word timestamps from Groq verbose_json.
      * Shape: [{ text, startMs, endMs, timestampMs, confidence }, ...]
@@ -32,7 +46,7 @@ export const captionedClipSchema = z.object({
         "colorful",
         "minimal",
     ]),
-    /** Background color of the video area */
+    /** Background color used only when videoSrc is empty */
     backgroundColor: zColor(),
     /** Accent color for highlights */
     accentColor: zColor(),
@@ -46,6 +60,7 @@ export type CaptionedClipProps = z.infer<typeof captionedClipSchema>;
 // Main Composition
 // ---------------------------------------------------------------------------
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
+    videoSrc,
     captionsData,
     captionStyle,
     backgroundColor,
@@ -79,16 +94,26 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     return (
         <AbsoluteFill
             style={{
-                backgroundColor,
+                backgroundColor: videoSrc ? "#000000" : backgroundColor,
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
             }}
         >
-            {/* Radial vignette */}
+            {/* Source video — fills the entire composition */}
+            {videoSrc ? (
+                <AbsoluteFill>
+                    <Video
+                        src={videoSrc}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                </AbsoluteFill>
+            ) : null}
+
+            {/* Radial vignette — darkens edges so text pops */}
             <AbsoluteFill
                 style={{
-                    background: `radial-gradient(ellipse at center, ${backgroundColor}00 0%, ${backgroundColor} 70%)`,
+                    background: `radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.45) 70%)`,
                 }}
             />
 

@@ -501,11 +501,22 @@ jobs:
               continue
             fi
 
-            # Write props to a temp JSON file (avoids shell escaping issues)
+            # Get the true duration of this clip (seconds) so Remotion renders
+            # exactly the right number of frames instead of the hardcoded 10 s.
+            CLIP_DURATION=$(ffprobe -v quiet -show_entries format=duration \
+              -of csv=p=0 "$clip")
+            DURATION_FRAMES=$(python3 -c \
+              "import math; print(max(1, math.ceil(${CLIP_DURATION} * 30)))")
+
+            # Build props JSON — includes videoSrc so the composition shows
+            # the actual video underneath the animated captions.
+            CLIP_ABS=$(realpath "$clip")
             python3 -c "
           import json
           captions = open('../workspace/clips/${BASENAME}.captions.json').read()
           props = {
+              'videoSrc': '${CLIP_ABS}',
+              'durationInFrames': ${DURATION_FRAMES},
               'captionsData': captions,
               'captionStyle': '$STYLE',
               'backgroundColor': '#000000',
@@ -515,7 +526,7 @@ jobs:
           print(json.dumps(props))
           " > /tmp/remotion_props.json
 
-            echo "  Rendering $BASENAME with $STYLE style..."
+            echo "  Rendering $BASENAME (${CLIP_DURATION}s → ${DURATION_FRAMES} frames) with $STYLE style..."
 
             npx remotion render CaptionedClip "$OUTPUT" \
               --props="$(cat /tmp/remotion_props.json)" \
