@@ -17,6 +17,7 @@ import {
     Loader2,
     RefreshCw,
     AlertTriangle,
+    Image,
 } from "lucide-react";
 
 export default function JobDetailPage({
@@ -30,6 +31,8 @@ export default function JobDetailPage({
     const [clips, setClips] = useState<Clip[]>([]);
     const [loading, setLoading] = useState(true);
     const [retrying, setRetrying] = useState(false);
+    const [downloadingAll, setDownloadingAll] = useState(false);
+    const [copiedId, setCopiedId] = useState<string | null>(null);
 
     useEffect(() => {
         async function load() {
@@ -79,13 +82,55 @@ export default function JobDetailPage({
             });
             const data = await res.json();
             if (!res.ok) {
-                // Update UI with the error
                 setJob((j) => j ? { ...j, status: "failed", error_message: data.error } : j);
             }
         } catch {
             setJob((j) => j ? { ...j, status: "failed", error_message: "Network error — could not reach trigger API" } : j);
         }
         setRetrying(false);
+    };
+
+    /** Download a single file by URL, forcing the browser to save it */
+    const triggerDownload = async (url: string, filename: string) => {
+        try {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(blobUrl);
+        } catch {
+            // Fallback: open in new tab
+            window.open(url, "_blank");
+        }
+    };
+
+    /** Download all clip videos (and thumbnails) sequentially */
+    const handleDownloadAll = async () => {
+        if (clips.length === 0) return;
+        setDownloadingAll(true);
+        for (const clip of clips) {
+            if (clip.drive_url) {
+                await triggerDownload(
+                    clip.drive_url,
+                    clip.filename || `clip_${clip.clip_index + 1}.mp4`
+                );
+                // Small delay between downloads so browsers don't block them
+                await new Promise((r) => setTimeout(r, 800));
+            }
+        }
+        setDownloadingAll(false);
+    };
+
+    /** Copy text to clipboard with visual feedback */
+    const handleCopy = (clipId: string, text: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedId(clipId);
+        setTimeout(() => setCopiedId(null), 2000);
     };
 
     if (loading) {
@@ -190,8 +235,16 @@ export default function JobDetailPage({
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn-secondary">
-                        <Download size={16} /> Download All
+                    <button
+                        className="btn-secondary"
+                        onClick={handleDownloadAll}
+                        disabled={downloadingAll || clips.length === 0}
+                    >
+                        {downloadingAll ? (
+                            <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Downloading...</>
+                        ) : (
+                            <><Download size={16} /> Download All ({clips.length})</>
+                        )}
                     </button>
                     <button className="btn-primary">
                         <Share2 size={16} /> Share
@@ -445,34 +498,55 @@ export default function JobDetailPage({
                                 )}
 
                                 {/* Actions */}
-                                <div style={{ display: "flex", gap: 8 }}>
-                                    <a
-                                        href={clip.drive_url || "#"}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <button
                                         className="btn-primary"
                                         style={{
                                             flex: 1,
                                             justifyContent: "center",
                                             padding: "8px 12px",
                                             fontSize: 13,
+                                            cursor: "pointer",
+                                            border: "none",
                                         }}
+                                        onClick={() => clip.drive_url && triggerDownload(
+                                            clip.drive_url,
+                                            clip.filename || `clip_${clip.clip_index + 1}.mp4`
+                                        )}
                                     >
-                                        <Download size={14} /> Download
-                                    </a>
+                                        <Download size={14} /> Video
+                                    </button>
+                                    {clip.thumbnail_url && (
+                                        <button
+                                            className="btn-secondary"
+                                            style={{
+                                                padding: "8px 12px",
+                                                fontSize: 13,
+                                                cursor: "pointer",
+                                            }}
+                                            onClick={() => triggerDownload(
+                                                clip.thumbnail_url!,
+                                                `thumb_${clip.clip_index + 1}.jpg`
+                                            )}
+                                            title="Download Thumbnail"
+                                        >
+                                            <Image size={14} />
+                                        </button>
+                                    )}
                                     <button
                                         className="btn-secondary"
                                         style={{
                                             padding: "8px 12px",
                                             fontSize: 13,
+                                            cursor: "pointer",
                                         }}
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(
-                                                `${clip.title}\n\n${clip.hook_caption}\n\n${clip.hashtags?.join(" ")}`
-                                            );
-                                        }}
+                                        onClick={() => handleCopy(
+                                            clip.id,
+                                            `${clip.title}\n\n${clip.hook_caption}\n\n${clip.hashtags?.join(" ")}`
+                                        )}
+                                        title={copiedId === clip.id ? "Copied!" : "Copy caption & hashtags"}
                                     >
-                                        <Copy size={14} />
+                                        {copiedId === clip.id ? "✓" : <Copy size={14} />}
                                     </button>
                                     <a
                                         href={clip.drive_url || "#"}
@@ -483,6 +557,7 @@ export default function JobDetailPage({
                                             padding: "8px 12px",
                                             fontSize: 13,
                                         }}
+                                        title="Open in Google Drive"
                                     >
                                         <ExternalLink size={14} />
                                     </a>

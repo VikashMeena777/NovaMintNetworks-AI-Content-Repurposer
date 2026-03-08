@@ -1033,16 +1033,36 @@ jobs:
             -d '{"status": "failed", "error_message": "Pipeline failed. Check GitHub Actions logs.", "progress": 0}'
 
       # ─────────────────────────────────────────────────────────────
-      # 12. Send Notification
+      # 12. Send Notifications (Email via Resend + Discord)
       # ─────────────────────────────────────────────────────────────
       - name: Send completion notification
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
           STATUS="${{ job.status }}"
           JOB_ID="${{ inputs.job_id }}"
 
+          # ── Email Notification via Resend (through our webhook API) ──
+          if [ -n "$DASHBOARD_URL" ] && [ -n "$WEBHOOK_SECRET" ]; then
+            if [ "$STATUS" = "success" ]; then
+              EMAIL_STATUS="done"
+              ERROR_MSG=""
+            else
+              EMAIL_STATUS="failed"
+              ERROR_MSG="Pipeline failed. Check GitHub Actions logs."
+            fi
+
+            echo "📧 Sending email notification..."
+            curl -s -X POST "${DASHBOARD_URL}/api/webhooks/job-status" \
+              -H "Content-Type: application/json" \
+              -d "{\"job_id\": \"${JOB_ID}\", \"status\": \"${EMAIL_STATUS}\", \"error_message\": \"${ERROR_MSG}\", \"webhook_secret\": \"${WEBHOOK_SECRET}\"}" \
+              || echo "  ⚠️ Email notification failed (non-critical)"
+          fi
+
+          # ── Discord Notification ──
           if [ "$STATUS" = "success" ]; then
             EMOJI="✅"
             MSG="ClipMint job **$JOB_ID** completed successfully!"
@@ -1056,3 +1076,4 @@ jobs:
               -H "Content-Type: application/json" \
               -d "{\"content\": \"$EMOJI $MSG\"}"
           fi
+
