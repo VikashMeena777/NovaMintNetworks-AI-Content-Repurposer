@@ -109,27 +109,41 @@ export default function JobDetailPage({
         return url; // Not a Drive URL, return as-is
     };
 
-    /** Download a single file — opens a direct download link in a new tab */
+    /** Download a single file — uses an iframe to avoid popup blockers for multiple downloads */
     const triggerDownload = (url: string, _filename: string) => {
         const downloadUrl = toDirectDriveUrl(url);
-        window.open(downloadUrl, "_blank");
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = downloadUrl;
+        document.body.appendChild(iframe);
+        // Clean up the iframe after 10 seconds
+        setTimeout(() => {
+            if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+            }
+        }, 10000);
     };
 
-    /** Download all clip videos sequentially (opens each in new tab) */
+    /** Download all clip videos sequentially */
     const handleDownloadAll = () => {
         if (clips.length === 0) return;
         setDownloadingAll(true);
-        clips.forEach((clip, i) => {
-            if (clip.drive_url) {
-                // Stagger downloads by 500ms to avoid popup blockers
-                setTimeout(() => {
-                    triggerDownload(
-                        clip.drive_url!,
-                        clip.filename || `clip_${clip.clip_index + 1}.mp4`
-                    );
-                    if (i === clips.length - 1) setDownloadingAll(false);
-                }, i * 500);
-            }
+        const validClips = clips.filter((c) => c.drive_url);
+
+        if (validClips.length === 0) {
+            setDownloadingAll(false);
+            return;
+        }
+
+        validClips.forEach((clip, i) => {
+            // Stagger downloads by 1000ms to ensure the browser processes each
+            setTimeout(() => {
+                triggerDownload(
+                    clip.drive_url!,
+                    clip.filename || `clip_${clip.clip_index + 1}.mp4`
+                );
+                if (i === validClips.length - 1) setDownloadingAll(false);
+            }, i * 1000);
         });
     };
 
