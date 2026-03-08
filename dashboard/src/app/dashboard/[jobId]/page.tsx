@@ -326,10 +326,25 @@ export default function JobDetailPage({
                                     position: "relative",
                                 }}
                             >
-                                <Film
-                                    size={40}
-                                    style={{ color: "var(--text-muted)", opacity: 0.3 }}
-                                />
+                                {clip.thumbnail_url ? (
+                                    <img
+                                        src={clip.thumbnail_url}
+                                        alt={clip.title || `Clip ${clip.clip_index + 1}`}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            height: "100%",
+                                            objectFit: "cover",
+                                        }}
+                                    />
+                                ) : (
+                                    <Film
+                                        size={40}
+                                        style={{ color: "var(--text-muted)", opacity: 0.3 }}
+                                    />
+                                )}
 
                                 {/* Viral score badge */}
                                 {clip.viral_score != null && (

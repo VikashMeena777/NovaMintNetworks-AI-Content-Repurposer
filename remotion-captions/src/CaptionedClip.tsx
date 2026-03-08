@@ -124,14 +124,40 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
                 alignItems: "center",
             }}
         >
-            {/* Source video — fills the entire composition */}
+            {/* Source video — blurred background + full-frame foreground */}
             {videoSrc ? (
-                <AbsoluteFill>
-                    <Video
-                        src={staticFile(videoSrc)}
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                </AbsoluteFill>
+                <>
+                    {/* Background: blurred & zoomed to fill 9:16 frame */}
+                    <AbsoluteFill>
+                        <Video
+                            src={staticFile(videoSrc)}
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                filter: "blur(20px)",
+                                transform: "scale(1.15)",
+                            }}
+                        />
+                    </AbsoluteFill>
+                    {/* Foreground: original video at full visibility */}
+                    <AbsoluteFill
+                        style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                        }}
+                    >
+                        <Video
+                            src={staticFile(videoSrc)}
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "contain",
+                            }}
+                        />
+                    </AbsoluteFill>
+                </>
             ) : null}
 
             {/* Radial vignette — darkens edges so text pops */}
