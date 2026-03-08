@@ -90,40 +90,47 @@ export default function JobDetailPage({
         setRetrying(false);
     };
 
-    /** Download a single file by URL, forcing the browser to save it */
-    const triggerDownload = async (url: string, filename: string) => {
-        try {
-            const res = await fetch(url);
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = blobUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(blobUrl);
-        } catch {
-            // Fallback: open in new tab
-            window.open(url, "_blank");
+    /**
+     * Convert a Google Drive view/preview URL to a direct-download URL.
+     * Input:  https://drive.google.com/file/d/FILE_ID/view
+     * Output: https://drive.google.com/uc?export=download&id=FILE_ID
+     */
+    const toDirectDriveUrl = (url: string): string => {
+        // Match /file/d/FILE_ID patterns
+        const match = url.match(/\/file\/d\/([^/]+)/);
+        if (match) {
+            return `https://drive.google.com/uc?export=download&id=${match[1]}`;
         }
+        // Match ?id=FILE_ID patterns
+        const idMatch = url.match(/[?&]id=([^&]+)/);
+        if (idMatch) {
+            return `https://drive.google.com/uc?export=download&id=${idMatch[1]}`;
+        }
+        return url; // Not a Drive URL, return as-is
     };
 
-    /** Download all clip videos (and thumbnails) sequentially */
-    const handleDownloadAll = async () => {
+    /** Download a single file — opens a direct download link in a new tab */
+    const triggerDownload = (url: string, _filename: string) => {
+        const downloadUrl = toDirectDriveUrl(url);
+        window.open(downloadUrl, "_blank");
+    };
+
+    /** Download all clip videos sequentially (opens each in new tab) */
+    const handleDownloadAll = () => {
         if (clips.length === 0) return;
         setDownloadingAll(true);
-        for (const clip of clips) {
+        clips.forEach((clip, i) => {
             if (clip.drive_url) {
-                await triggerDownload(
-                    clip.drive_url,
-                    clip.filename || `clip_${clip.clip_index + 1}.mp4`
-                );
-                // Small delay between downloads so browsers don't block them
-                await new Promise((r) => setTimeout(r, 800));
+                // Stagger downloads by 500ms to avoid popup blockers
+                setTimeout(() => {
+                    triggerDownload(
+                        clip.drive_url!,
+                        clip.filename || `clip_${clip.clip_index + 1}.mp4`
+                    );
+                    if (i === clips.length - 1) setDownloadingAll(false);
+                }, i * 500);
             }
-        }
-        setDownloadingAll(false);
+        });
     };
 
     /** Copy text to clipboard with visual feedback */
