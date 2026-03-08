@@ -104,7 +104,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
             {videoSrc ? (
                 <AbsoluteFill>
                     <Video
-                        src={videoSrc}
+                        src={staticFile(videoSrc)}
                         style={{ width: "100%", height: "100%", objectFit: "cover" }}
                     />
                 </AbsoluteFill>

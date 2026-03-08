@@ -508,14 +508,16 @@ jobs:
             DURATION_FRAMES=$(python3 -c \
               "import math; print(max(1, math.ceil(${CLIP_DURATION} * 30)))")
 
-            # Build props JSON — includes videoSrc so the composition shows
-            # the actual video underneath the animated captions.
-            CLIP_ABS=$(realpath "$clip")
+            # Copy video into Remotion's public/ folder so the dev server
+            # can serve it at a relative URL (staticFile path).
+            mkdir -p public
+            cp "$clip" "public/${BASENAME}.mp4"
+
             python3 -c "
           import json
           captions = open('../workspace/clips/${BASENAME}.captions.json').read()
           props = {
-              'videoSrc': '${CLIP_ABS}',
+              'videoSrc': '${BASENAME}.mp4',
               'durationInFrames': ${DURATION_FRAMES},
               'captionsData': captions,
               'captionStyle': '$STYLE',
@@ -551,8 +553,10 @@ jobs:
             [ -f "$clip" ] || continue
             BASENAME=$(basename "$clip" _captioned.mp4)
 
-            # Extract frame at 2 seconds as thumbnail
-            ffmpeg -i "$clip" -ss 2 -vframes 1 \
+            # Extract a keyframe near 2 s as thumbnail.
+            # -ss before -i = fast seek (key-frame accuracy, fine for thumbnails).
+            # -frames:v 1 takes exactly one frame; no -update flag needed.
+            ffmpeg -ss 2 -i "$clip" -frames:v 1 -q:v 2 \
               -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" \
               "workspace/thumbnails/${BASENAME}_thumb.jpg" \
               -y -loglevel warning || true
