@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import type { Profile } from "@/lib/types";
+import type { Profile, Payment } from "@/lib/types";
 import { CAPTION_STYLES, PLAN_LIMITS, type CaptionStyle } from "@/lib/types";
 import {
     User, Bell, CreditCard, ShieldAlert, Save, Loader2,
     ExternalLink, Check, Crown, Sparkles, AlertTriangle,
-    Trash2, Lock, ArrowUpRight,
+    Trash2, Lock, ArrowUpRight, Calendar, XCircle,
+    Receipt, RefreshCw, Zap,
 } from "lucide-react";
 
 type SettingsTab = "profile" | "notifications" | "billing" | "security";
@@ -24,6 +25,7 @@ export default function SettingsPage() {
     const supabase = createClient();
     const router = useRouter();
     const [profile, setProfile] = useState<Profile | null>(null);
+    const [payments, setPayments] = useState<Payment[]>([]);
     const [email, setEmail] = useState("");
     const [fullName, setFullName] = useState("");
     const [defaultStyle, setDefaultStyle] = useState<CaptionStyle>("hormozi");
@@ -42,6 +44,8 @@ export default function SettingsPage() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleteInput, setDeleteInput] = useState("");
     const [deleting, setDeleting] = useState(false);
+    const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
 
     useEffect(() => {
         async function load() {
@@ -64,6 +68,19 @@ export default function SettingsPage() {
                 });
                 setDiscordWebhookUrl(p.discord_webhook_url ?? "");
             }
+
+            // Load payment history
+            const { data: paymentData } = await supabase
+                .from("payments")
+                .select("*")
+                .eq("user_id", user.id)
+                .order("created_at", { ascending: false })
+                .limit(10);
+
+            if (paymentData) {
+                setPayments(paymentData as Payment[]);
+            }
+
             setLoading(false);
         }
         load();
@@ -108,10 +125,31 @@ export default function SettingsPage() {
         setSaving(false);
     };
 
+    const handleCancelSubscription = async () => {
+        setCancelling(true);
+        try {
+            const res = await fetch("/api/razorpay/cancel", { method: "POST" });
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                showToast("success", data.message);
+                setShowCancelConfirm(false);
+                // Refresh profile
+                if (profile) {
+                    setProfile({ ...profile, subscription_status: "cancelled" });
+                }
+            } else {
+                showToast("error", data.error || "Failed to cancel subscription");
+            }
+        } catch {
+            showToast("error", "Failed to cancel subscription");
+        }
+        setCancelling(false);
+    };
+
     const handleDeleteAccount = async () => {
         if (deleteInput !== "DELETE") return;
         setDeleting(true);
-        // Sign out and redirect - actual account deletion would need a server-side function
         await supabase.auth.signOut();
         router.push("/login");
     };
@@ -130,6 +168,9 @@ export default function SettingsPage() {
     const planKey = profile?.plan ?? "free";
     const planInfo = PLAN_LIMITS[planKey];
     const initial = (profile?.full_name || "U").charAt(0).toUpperCase();
+    const hasActiveSubscription = profile?.subscription_status === "active" || profile?.subscription_status === "authenticated";
+    const isCancelled = profile?.subscription_status === "cancelled";
+    const periodEndDate = profile?.current_period_end ? new Date(profile.current_period_end) : null;
 
     return (
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -166,7 +207,6 @@ export default function SettingsPage() {
             {/* ═══════════ Profile Tab ═══════════ */}
             {activeTab === "profile" && (
                 <div className="glass-card" style={{ padding: 28 }}>
-                    {/* Avatar + Name section */}
                     <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
                         <div style={{
                             width: 64, height: 64, borderRadius: "50%",
@@ -196,7 +236,6 @@ export default function SettingsPage() {
                         </div>
                     </div>
 
-                    {/* Default Caption Style */}
                     <div>
                         <label style={{ display: "block", fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Default Caption Style</label>
                         <div className="dash-grid-3">
@@ -275,14 +314,14 @@ export default function SettingsPage() {
             {/* ═══════════ Billing Tab ═══════════ */}
             {activeTab === "billing" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                    {/* Current Plan Card */}
+                    {/* ─── Current Plan Card ─── */}
                     <div className="glass-card" style={{ padding: 28, position: "relative", overflow: "hidden" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
                             <div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                                     <Crown size={20} style={{ color: planKey === "free" ? "var(--text-muted)" : "var(--accent-primary)" }} />
                                     <span className="gradient-text" style={{ fontSize: 22, fontWeight: 800 }}>
-                                        {planKey.charAt(0).toUpperCase() + planKey.slice(1)} Plan
+                                        {planInfo.label} Plan
                                     </span>
                                 </div>
                                 <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
@@ -292,7 +331,7 @@ export default function SettingsPage() {
                                 </div>
                             </div>
                             <a href="/pricing" className="btn-primary" style={{ textDecoration: "none", padding: "10px 20px", fontSize: 13 }}>
-                                <Sparkles size={15} /> Upgrade <ArrowUpRight size={14} />
+                                <Sparkles size={15} /> {planKey === "free" ? "Upgrade" : "Change Plan"} <ArrowUpRight size={14} />
                             </a>
                         </div>
 
@@ -310,7 +349,119 @@ export default function SettingsPage() {
                         )}
                     </div>
 
-                    {/* Plan Comparison */}
+                    {/* ─── Subscription Details Card (for paid users) ─── */}
+                    {planKey !== "free" && (
+                        <div className="glass-card" style={{ padding: 28 }}>
+                            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                                <CreditCard size={16} style={{ color: "var(--accent-primary)" }} />
+                                Subscription Details
+                            </h3>
+
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+                                {/* Status */}
+                                <div style={{
+                                    padding: "14px 16px", borderRadius: 12,
+                                    background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                                }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        Status
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <div style={{
+                                            width: 8, height: 8, borderRadius: "50%",
+                                            background: hasActiveSubscription ? "var(--accent-green)" : isCancelled ? "var(--accent-red)" : "var(--text-muted)",
+                                        }} />
+                                        <span style={{
+                                            fontSize: 14, fontWeight: 700,
+                                            color: hasActiveSubscription ? "var(--accent-green)" : isCancelled ? "var(--accent-red)" : "var(--text-secondary)",
+                                        }}>
+                                            {hasActiveSubscription ? "Active" : isCancelled ? "Cancelled" : profile?.subscription_status === "none" ? "One-time" : (profile?.subscription_status ?? "None")}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Billing Period */}
+                                <div style={{
+                                    padding: "14px 16px", borderRadius: 12,
+                                    background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                                }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        Billing Period
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                        {profile?.plan_period === "one_time" ? (
+                                            <><Zap size={14} /> One-time</>
+                                        ) : profile?.plan_period === "annual" ? (
+                                            <><Calendar size={14} /> Annual</>
+                                        ) : (
+                                            <><RefreshCw size={14} /> Monthly</>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Amount */}
+                                <div style={{
+                                    padding: "14px 16px", borderRadius: 12,
+                                    background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                                }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        Amount
+                                    </div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                        ₹{((profile?.plan_period === "annual" ? planInfo.annualPrice : planInfo.monthlyPrice) / 100).toLocaleString("en-IN")}
+                                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-muted)" }}>
+                                            {profile?.plan_period === "annual" ? "/mo" : profile?.plan_period === "one_time" ? "/30 days" : "/mo"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Next Billing / Expiry */}
+                                {periodEndDate && (
+                                    <div style={{
+                                        padding: "14px 16px", borderRadius: 12,
+                                        background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                                    }}>
+                                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                            {isCancelled ? "Access Until" : hasActiveSubscription ? "Next Billing" : "Expires"}
+                                        </div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                            <Calendar size={14} />
+                                            {periodEndDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Cancel notice */}
+                            {isCancelled && periodEndDate && (
+                                <div style={{
+                                    padding: "12px 16px", borderRadius: 10,
+                                    background: "rgba(255,82,82,0.06)", border: "1px solid rgba(255,82,82,0.15)",
+                                    marginBottom: 16, display: "flex", alignItems: "center", gap: 8,
+                                }}>
+                                    <AlertTriangle size={14} style={{ color: "var(--accent-red)", flexShrink: 0 }} />
+                                    <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                                        Your subscription has been cancelled. You&apos;ll retain access to all features until{" "}
+                                        <strong>{periodEndDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong>.
+                                        After that, your plan will revert to Free.
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Cancel button (only for active subscriptions) */}
+                            {hasActiveSubscription && profile?.razorpay_subscription_id && (
+                                <button
+                                    className="btn-secondary"
+                                    onClick={() => setShowCancelConfirm(true)}
+                                    style={{ borderColor: "rgba(255,82,82,0.3)", color: "var(--accent-red)" }}
+                                >
+                                    <XCircle size={14} /> Cancel Subscription
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ─── Upgrade CTA (for free users) ─── */}
                     {planKey === "free" && (
                         <div className="glass-card" style={{ padding: 28 }}>
                             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
@@ -341,13 +492,60 @@ export default function SettingsPage() {
                             </a>
                         </div>
                     )}
+
+                    {/* ─── Payment History ─── */}
+                    {payments.length > 0 && (
+                        <div className="glass-card" style={{ padding: 28 }}>
+                            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                                <Receipt size={16} style={{ color: "var(--accent-primary)" }} />
+                                Payment History
+                            </h3>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                                {payments.map((payment, i) => (
+                                    <div
+                                        key={payment.id}
+                                        style={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            padding: "14px 0",
+                                            borderBottom: i < payments.length - 1 ? "1px solid var(--border-subtle)" : "none",
+                                        }}
+                                    >
+                                        <div>
+                                            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                                                {payment.plan.charAt(0).toUpperCase() + payment.plan.slice(1)} Plan
+                                                <span style={{
+                                                    fontSize: 11, fontWeight: 500, marginLeft: 8,
+                                                    padding: "2px 8px", borderRadius: 4,
+                                                    background: payment.status === "captured" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
+                                                    color: payment.status === "captured" ? "var(--accent-green)" : "var(--accent-red)",
+                                                }}>
+                                                    {payment.status === "captured" ? "Paid" : payment.status}
+                                                </span>
+                                            </div>
+                                            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                                                {new Date(payment.created_at).toLocaleDateString("en-IN", {
+                                                    day: "numeric", month: "short", year: "numeric",
+                                                })}
+                                                {" · "}
+                                                {payment.plan_period === "one_time" ? "One-time" : payment.plan_period === "annual" ? "Annual" : "Monthly"}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
+                                            ₹{(payment.amount / 100).toLocaleString("en-IN")}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* ═══════════ Security Tab ═══════════ */}
             {activeTab === "security" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                    {/* Password */}
                     <div className="glass-card" style={{ padding: 28 }}>
                         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
                             <Lock size={16} style={{ color: "var(--accent-primary)" }} /> Password
@@ -363,7 +561,6 @@ export default function SettingsPage() {
                         </button>
                     </div>
 
-                    {/* Danger Zone */}
                     <div className="danger-zone">
                         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: "var(--accent-red)", display: "flex", alignItems: "center", gap: 8 }}>
                             <AlertTriangle size={16} /> Danger Zone
@@ -392,6 +589,59 @@ export default function SettingsPage() {
                 >
                     {saving ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <><Save size={18} /> Save Changes</>}
                 </button>
+            )}
+
+            {/* ─── Cancel Subscription Confirmation Modal ─── */}
+            {showCancelConfirm && (
+                <div
+                    style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
+                    onClick={() => setShowCancelConfirm(false)}
+                >
+                    <div
+                        className="glass-card animate-scale-in"
+                        style={{ padding: 28, width: 440, maxWidth: "90vw" }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                            <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,82,82,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                <XCircle size={20} style={{ color: "var(--accent-red)" }} />
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: 18, fontWeight: 700 }}>Cancel Subscription</h3>
+                                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>You&apos;ll retain access until the end of your billing period</p>
+                            </div>
+                        </div>
+
+                        <div style={{
+                            padding: "12px 16px", borderRadius: 10,
+                            background: "rgba(255,82,82,0.06)", border: "1px solid rgba(255,82,82,0.15)",
+                            marginBottom: 20,
+                        }}>
+                            <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                                After cancellation you&apos;ll keep access to all {planInfo.label} plan features until your current billing period ends.
+                                Your plan will then revert to Free with 5 clips/month and 2 videos/month.
+                            </p>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12 }}>
+                            <button
+                                className="btn-secondary"
+                                style={{ flex: 1, justifyContent: "center" }}
+                                onClick={() => setShowCancelConfirm(false)}
+                            >
+                                Keep Subscription
+                            </button>
+                            <button
+                                className="btn-primary"
+                                style={{ flex: 1, justifyContent: "center", background: "var(--accent-red)" }}
+                                disabled={cancelling}
+                                onClick={handleCancelSubscription}
+                            >
+                                {cancelling ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <><XCircle size={14} /> Cancel</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* ─── Delete Account Confirmation Modal ─── */}
