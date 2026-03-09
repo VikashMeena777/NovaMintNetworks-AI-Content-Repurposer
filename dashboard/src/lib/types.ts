@@ -22,7 +22,8 @@ export type JobStatus =
     | "captioning"
     | "uploading"
     | "done"
-    | "failed";
+    | "failed"
+    | "cancelled";
 
 export type ClipStatus = "ready" | "scheduled" | "published" | "failed";
 
@@ -94,7 +95,7 @@ export interface Clip {
 }
 
 export const PLAN_LIMITS: Record<Plan, { clips: number; videos: number; price: string }> = {
-    free: { clips: 5, videos: 1, price: "₹0" },
+    free: { clips: 5, videos: 2, price: "₹0" },
     creator: { clips: 50, videos: 5, price: "₹499/mo" },
     pro: { clips: 200, videos: 20, price: "₹1,499/mo" },
     agency: { clips: 9999, videos: 9999, price: "₹4,999/mo" },
@@ -122,4 +123,5 @@ export const JOB_STATUS_LABELS: Record<JobStatus, { label: string; emoji: string
     uploading: { label: "Uploading", emoji: "☁️", color: "#06B6D4" },
     done: { label: "Done", emoji: "✅", color: "#10B981" },
     failed: { label: "Failed", emoji: "❌", color: "#EF4444" },
+    cancelled: { label: "Cancelled", emoji: "⚠️", color: "#F59E0B" },
 };

@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase";
 import {
     Upload,
     Link2,
-    HardDrive,
     ArrowRight,
     Sparkles,
     Info,
@@ -22,7 +21,7 @@ export default function NewVideoPage() {
     const [maxClips, setMaxClips] = useState(10);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [sourceType, setSourceType] = useState<"url" | "upload" | "drive">("url");
+    const [sourceType, setSourceType] = useState<"url" | "upload">("url");
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -133,7 +132,6 @@ export default function NewVideoPage() {
                     {[
                         { value: "url" as const, label: "Paste URL", icon: <Link2 size={16} /> },
                         { value: "upload" as const, label: "Upload via Drive", icon: <Upload size={16} /> },
-                        { value: "drive" as const, label: "Google Drive", icon: <HardDrive size={16} /> },
                     ].map((tab) => (
                         <button
                             key={tab.value}
@@ -316,30 +314,6 @@ export default function NewVideoPage() {
                     </div>
                 )}
 
-                {/* ─── Direct Drive Link ─── */}
-                {sourceType === "drive" && (
-                    <div style={{ marginBottom: 28 }}>
-                        <label
-                            style={{
-                                display: "block",
-                                fontSize: 14,
-                                fontWeight: 600,
-                                marginBottom: 8,
-                                color: "var(--text-secondary)",
-                            }}
-                        >
-                            Google Drive Link
-                        </label>
-                        <input
-                            type="url"
-                            value={videoUrl}
-                            onChange={(e) => setVideoUrl(e.target.value)}
-                            placeholder="https://drive.google.com/file/d/..."
-                            className="input-field"
-                            required
-                        />
-                    </div>
-                )}
 
                 {/* ─── Caption Style Picker ─── */}
                 <div style={{ marginBottom: 28 }}>

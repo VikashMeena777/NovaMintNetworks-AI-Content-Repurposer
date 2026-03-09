@@ -106,6 +106,46 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Decrement videos_used when job fails or is cancelled ──
+    // (The user's videos_used was incremented at submission time,
+    //  so we reverse it here since the job didn't succeed.)
+    if (status === "failed" || status === "cancelled") {
+      try {
+        const profileRes = await fetch(
+          `${supabaseUrl}/rest/v1/profiles?id=eq.${job.user_id}&select=videos_used`,
+          {
+            headers: {
+              apikey: serviceKey,
+              Authorization: `Bearer ${serviceKey}`,
+            },
+          }
+        );
+        const profiles = await profileRes.json();
+        if (profiles && profiles.length > 0) {
+          const currentVideosUsed = profiles[0].videos_used || 0;
+          const newVideosUsed = Math.max(0, currentVideosUsed - 1);
+          await fetch(
+            `${supabaseUrl}/rest/v1/profiles?id=eq.${job.user_id}`,
+            {
+              method: "PATCH",
+              headers: {
+                apikey: serviceKey,
+                Authorization: `Bearer ${serviceKey}`,
+                "Content-Type": "application/json",
+                Prefer: "return=minimal",
+              },
+              body: JSON.stringify({
+                videos_used: newVideosUsed,
+              }),
+            }
+          );
+          console.log(`Decremented videos_used: ${currentVideosUsed} → ${newVideosUsed} for user ${job.user_id} (job ${status})`);
+        }
+      } catch (err) {
+        console.error("Failed to decrement videos_used:", err);
+      }
+    }
+
     // ── Get user email + profile (for notification prefs) ──
     const userRes = await fetch(
       `${supabaseUrl}/auth/v1/admin/users/${job.user_id}`,
@@ -228,6 +268,18 @@ export async function POST(request: NextRequest) {
 
 // ── Discord Webhook ──
 
+/** Strip internal/technical references from error messages before showing to users */
+function sanitizeErrorMessage(msg: string | undefined): string {
+  if (!msg) return "An unexpected error occurred. Please try again or contact support.";
+  return msg
+    .replace(/GitHub/gi, "")
+    .replace(/pipeline/gi, "processing")
+    .replace(/Actions/g, "")
+    .replace(/\blogs?\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || "An unexpected error occurred. Please try again or contact support.";
+}
+
 async function sendDiscordNotification(opts: {
   webhookUrl: string;
   status: string;
@@ -237,12 +289,13 @@ async function sendDiscordNotification(opts: {
   errorMessage?: string;
 }) {
   const isSuccess = opts.status === "done";
+  const safeError = sanitizeErrorMessage(opts.errorMessage);
 
   const embed = {
     title: isSuccess ? "🎬 Your clips are ready!" : "⚠️ Processing failed",
     description: isSuccess
       ? `ClipMint generated **${opts.clipCount} clip${opts.clipCount !== 1 ? "s" : ""}** from your video.`
-      : `ClipMint encountered an error while processing your video.\n\n**Error:** ${opts.errorMessage || "An unexpected error occurred"}`,
+      : `ClipMint encountered an error while processing your video.\n\n**Error:** ${safeError}`,
     color: isSuccess ? 0x39E508 : 0xEF4444,
     fields: [
       {

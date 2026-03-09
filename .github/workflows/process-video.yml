@@ -1099,7 +1099,21 @@ jobs:
             -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d '{"status": "failed", "error_message": "Pipeline failed. Check GitHub Actions logs.", "progress": 0}'
+            -d '{"status": "failed", "error_message": "Video processing failed. Please try again or contact support.", "progress": 0}'
+
+      - name: Mark job as failed on cancellation
+        if: cancelled()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "⚠️ Pipeline cancelled — updating job status..."
+          curl -s -X PATCH "$SUPABASE_URL/rest/v1/jobs?id=eq.${{ inputs.job_id }}" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"status": "cancelled", "error_message": "Processing was cancelled.", "progress": 0}'
 
       # ─────────────────────────────────────────────────────────────
       # 12. Send Notifications (Email via Resend + Discord)
@@ -1114,30 +1128,36 @@ jobs:
           STATUS="${{ job.status }}"
           JOB_ID="${{ inputs.job_id }}"
 
-          # ── Email Notification via Resend (through our webhook API) ──
+          # ── Email + Discord Notification via our webhook API ──
           if [ -n "$DASHBOARD_URL" ] && [ -n "$WEBHOOK_SECRET" ]; then
             if [ "$STATUS" = "success" ]; then
               EMAIL_STATUS="done"
               ERROR_MSG=""
+            elif [ "$STATUS" = "cancelled" ]; then
+              EMAIL_STATUS="cancelled"
+              ERROR_MSG="Processing was cancelled."
             else
               EMAIL_STATUS="failed"
-              ERROR_MSG="Pipeline failed. Check GitHub Actions logs."
+              ERROR_MSG="Video processing failed. Please try again or contact support."
             fi
 
-            echo "📧 Sending email notification..."
+            echo "📧 Sending notification..."
             curl -s -X POST "${DASHBOARD_URL}/api/webhooks/job-status" \
               -H "Content-Type: application/json" \
               -d "{\"job_id\": \"${JOB_ID}\", \"status\": \"${EMAIL_STATUS}\", \"error_message\": \"${ERROR_MSG}\", \"webhook_secret\": \"${WEBHOOK_SECRET}\"}" \
-              || echo "  ⚠️ Email notification failed (non-critical)"
+              || echo "  ⚠️ Notification failed (non-critical)"
           fi
 
-          # ── Discord Notification ──
+          # ── Admin Discord Notification ──
           if [ "$STATUS" = "success" ]; then
             EMOJI="✅"
             MSG="ClipMint job **$JOB_ID** completed successfully!"
+          elif [ "$STATUS" = "cancelled" ]; then
+            EMOJI="⚠️"
+            MSG="ClipMint job **$JOB_ID** was cancelled."
           else
             EMOJI="❌"
-            MSG="ClipMint job **$JOB_ID** failed. Check GitHub Actions logs."
+            MSG="ClipMint job **$JOB_ID** failed."
           fi
 
           if [ -n "$DISCORD_WEBHOOK" ]; then

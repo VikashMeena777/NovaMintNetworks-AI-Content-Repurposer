@@ -19,7 +19,7 @@ CREATE TABLE public.profiles (
     clips_used INTEGER NOT NULL DEFAULT 0,
     clips_limit INTEGER NOT NULL DEFAULT 5,
     videos_used INTEGER NOT NULL DEFAULT 0,
-    videos_limit INTEGER NOT NULL DEFAULT 1,
+    videos_limit INTEGER NOT NULL DEFAULT 2,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -85,7 +85,7 @@ CREATE TABLE public.jobs (
     -- Status tracking
     status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
         'queued', 'downloading', 'transcribing', 'analyzing',
-        'clipping', 'captioning', 'uploading', 'done', 'failed'
+        'clipping', 'captioning', 'uploading', 'done', 'failed', 'cancelled'
     )),
     progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
     error_message TEXT,
