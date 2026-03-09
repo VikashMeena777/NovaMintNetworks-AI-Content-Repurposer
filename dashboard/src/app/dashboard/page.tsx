@@ -114,7 +114,7 @@ export default function JobsPage() {
 
     const totalJobs = jobs.length;
     const processing = jobs.filter(
-        (j) => !["done", "failed", "queued"].includes(j.status)
+        (j) => !["done", "failed", "queued", "cancelled"].includes(j.status)
     ).length;
     const completed = jobs.filter((j) => j.status === "done").length;
     const totalClips = jobs.reduce((sum, j) => sum + (j.clips_count || 0), 0);
@@ -471,7 +471,8 @@ export default function JobsPage() {
                                 >
                                     {job.status !== "done" &&
                                         job.status !== "failed" &&
-                                        job.status !== "queued" && (
+                                        job.status !== "queued" &&
+                                        job.status !== "cancelled" && (
                                             <div
                                                 style={{
                                                     display: "flex",

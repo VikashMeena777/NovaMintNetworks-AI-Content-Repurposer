@@ -320,8 +320,52 @@ export default function JobDetailPage({
                 </div>
             )}
 
+            {/* ─── Cancelled box ─── */}
+            {job.status === "cancelled" && (
+                <div
+                    className="glass-card"
+                    style={{
+                        padding: 20,
+                        marginBottom: 32,
+                        border: "1px solid rgba(245,158,11,0.3)",
+                        background: "rgba(245,158,11,0.05)",
+                    }}
+                >
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <AlertTriangle size={20} style={{ color: "#F59E0B", flexShrink: 0, marginTop: 2 }} />
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#F59E0B", marginBottom: 6 }}>
+                                Processing cancelled
+                            </div>
+                            <div
+                                style={{
+                                    fontSize: 13,
+                                    color: "var(--text-secondary)",
+                                    marginBottom: 12,
+                                    lineHeight: 1.5,
+                                }}
+                            >
+                                This job was cancelled before it could finish. You can retry to reprocess your video — it won&apos;t count against your plan.
+                            </div>
+                            <button
+                                className="btn-primary"
+                                onClick={handleRetry}
+                                disabled={retrying}
+                                style={{ padding: "8px 16px", fontSize: 13 }}
+                            >
+                                {retrying ? (
+                                    <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Retrying...</>
+                                ) : (
+                                    <><RefreshCw size={14} /> Retry</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ─── Progress bar for active jobs ─── */}
-            {job.status !== "done" && job.status !== "failed" && (
+            {job.status !== "done" && job.status !== "failed" && job.status !== "cancelled" && (
                 <div className="glass-card" style={{ padding: 24, marginBottom: 32 }}>
                     <div
                         style={{

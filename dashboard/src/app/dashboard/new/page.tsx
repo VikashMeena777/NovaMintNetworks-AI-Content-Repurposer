@@ -55,6 +55,16 @@ export default function NewVideoPage() {
                 setIsSubmitting(false);
                 return;
             }
+            // Cap max clips to remaining allowance
+            const remainingClips = profile.clips_limit - profile.clips_used;
+            if (remainingClips <= 0) {
+                setError(`You have no clips remaining on your plan. Please upgrade to continue.`);
+                setIsSubmitting(false);
+                return;
+            }
+            if (maxClips > remainingClips) {
+                setMaxClips(remainingClips);
+            }
         }
 
         const { data, error: insertError } = await supabase

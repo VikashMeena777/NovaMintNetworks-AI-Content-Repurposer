@@ -204,7 +204,8 @@ export async function POST(request: NextRequest) {
     // ── Check if this notification type is enabled ──
     const shouldNotify =
       (status === "done" && notifyJobComplete) ||
-      (status === "failed" && notifyJobFailed);
+      (status === "failed" && notifyJobFailed) ||
+      (status === "cancelled" && notifyJobFailed);
 
     // ── Send Email notification ──
     if (shouldNotify && notifyEmail) {
