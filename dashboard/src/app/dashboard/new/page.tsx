@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import {
@@ -11,8 +11,6 @@ import {
     Sparkles,
     Info,
     Loader2,
-    CheckCircle2,
-    X,
 } from "lucide-react";
 import { CAPTION_STYLES, type CaptionStyle } from "@/lib/types";
 
@@ -26,97 +24,9 @@ export default function NewVideoPage() {
     const [error, setError] = useState<string | null>(null);
     const [sourceType, setSourceType] = useState<"url" | "upload" | "drive">("url");
 
-    // File upload state
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [uploadProgress, setUploadProgress] = useState(0);
-    const [isUploading, setIsUploading] = useState(false);
-    const [isDragging, setIsDragging] = useState(false);
-
-    const handleFileSelect = (file: File) => {
-        if (!file.type.startsWith("video/")) {
-            setError("Please select a video file (MP4, MOV, WebM).");
-            return;
-        }
-        if (file.size > 500 * 1024 * 1024) {
-            setError("File is too large. Max size is 500MB.");
-            return;
-        }
-        setError(null);
-        setSelectedFile(file);
-    };
-
-    const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) handleFileSelect(file);
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) handleFileSelect(file);
-    };
-
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(true);
-    };
-
-    const handleDragLeave = (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(false);
-    };
-
-    const clearFile = () => {
-        setSelectedFile(null);
-        setUploadProgress(0);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-    const uploadFile = async (userId: string): Promise<string | null> => {
-        if (!selectedFile) return null;
-        setIsUploading(true);
-        setUploadProgress(10);
-
-        const ext = selectedFile.name.split(".").pop() || "mp4";
-        const filePath = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-
-        setUploadProgress(30);
-
-        const { error: uploadError } = await supabase.storage
-            .from("videos")
-            .upload(filePath, selectedFile, {
-                cacheControl: "3600",
-                upsert: false,
-            });
-
-        if (uploadError) {
-            setError(`Upload failed: ${uploadError.message}`);
-            setIsUploading(false);
-            return null;
-        }
-
-        setUploadProgress(90);
-
-        const { data: urlData } = supabase.storage
-            .from("videos")
-            .getPublicUrl(filePath);
-
-        setUploadProgress(100);
-        setIsUploading(false);
-        return urlData.publicUrl;
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-
-        // Validate inputs based on source type
-        if (sourceType === "upload" && !selectedFile) {
-            setError("Please select a video file to upload.");
-            return;
-        }
-        if (sourceType !== "upload" && !videoUrl.trim()) return;
+        if (!videoUrl.trim()) return;
 
         setIsSubmitting(true);
         setError(null);
@@ -148,24 +58,12 @@ export default function NewVideoPage() {
             }
         }
 
-        // Handle file upload if needed
-        let finalVideoUrl = videoUrl.trim();
-        if (sourceType === "upload") {
-            const uploadedUrl = await uploadFile(user.id);
-            if (!uploadedUrl) {
-                setIsSubmitting(false);
-                return;
-            }
-            finalVideoUrl = uploadedUrl;
-        }
-
         const { data, error: insertError } = await supabase
             .from("jobs")
             .insert({
                 user_id: user.id,
-                video_url: finalVideoUrl,
-                video_filename: sourceType === "upload" ? selectedFile?.name : null,
-                source_type: sourceType,
+                video_url: videoUrl.trim(),
+                source_type: sourceType === "upload" ? "drive" : sourceType,
                 caption_style: captionStyle,
                 max_clips: maxClips,
                 status: "queued",
@@ -196,7 +94,7 @@ export default function NewVideoPage() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         job_id: data.id,
-                        video_url: finalVideoUrl,
+                        video_url: videoUrl.trim(),
                         caption_style: captionStyle,
                         max_clips: maxClips,
                     }),
@@ -234,7 +132,7 @@ export default function NewVideoPage() {
                 >
                     {[
                         { value: "url" as const, label: "Paste URL", icon: <Link2 size={16} /> },
-                        { value: "upload" as const, label: "Upload File", icon: <Upload size={16} /> },
+                        { value: "upload" as const, label: "Upload via Drive", icon: <Upload size={16} /> },
                         { value: "drive" as const, label: "Google Drive", icon: <HardDrive size={16} /> },
                     ].map((tab) => (
                         <button
@@ -301,7 +199,7 @@ export default function NewVideoPage() {
                     </div>
                 )}
 
-                {/* ─── File Upload ─── */}
+                {/* ─── Upload via Google Drive (replaces direct file upload) ─── */}
                 {sourceType === "upload" && (
                     <div style={{ marginBottom: 28 }}>
                         <label
@@ -313,105 +211,112 @@ export default function NewVideoPage() {
                                 color: "var(--text-secondary)",
                             }}
                         >
-                            Upload Video File
+                            Upload Your Video via Google Drive
                         </label>
-
-                        {selectedFile ? (
-                            /* ─── Selected file preview ─── */
-                            <div
-                                style={{
-                                    border: "2px solid var(--accent-primary)",
-                                    borderRadius: 16,
-                                    padding: "24px",
-                                    background: "rgba(108,92,231,0.05)",
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                                        <CheckCircle2 size={24} style={{ color: "var(--accent-primary)" }} />
-                                        <div>
-                                            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-                                                {selectedFile.name}
-                                            </div>
-                                            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                                                {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
-                                            </div>
+                        <div
+                            className="glass-card"
+                            style={{
+                                padding: 24,
+                                marginBottom: 16,
+                            }}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                                    <div style={{
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: "50%",
+                                        background: "rgba(108,92,231,0.15)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        flexShrink: 0,
+                                        fontSize: 14,
+                                        fontWeight: 700,
+                                        color: "var(--accent-primary)",
+                                    }}>1</div>
+                                    <div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+                                            Upload to Google Drive
+                                        </div>
+                                        <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                                            Upload your video file to your Google Drive account
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={clearFile}
-                                        style={{
-                                            background: "rgba(239,68,68,0.1)",
-                                            border: "1px solid rgba(239,68,68,0.3)",
-                                            borderRadius: 8,
-                                            padding: "6px",
-                                            cursor: "pointer",
-                                            color: "#EF4444",
-                                            display: "flex",
-                                        }}
-                                    >
-                                        <X size={16} />
-                                    </button>
                                 </div>
-                                {isUploading && (
-                                    <div style={{ marginTop: 16 }}>
-                                        <div className="progress-bar" style={{ height: 6 }}>
-                                            <div
-                                                className="progress-bar-fill"
-                                                style={{ width: `${uploadProgress}%`, transition: "width 0.3s ease" }}
-                                            />
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                                    <div style={{
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: "50%",
+                                        background: "rgba(108,92,231,0.15)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        flexShrink: 0,
+                                        fontSize: 14,
+                                        fontWeight: 700,
+                                        color: "var(--accent-primary)",
+                                    }}>2</div>
+                                    <div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+                                            Share with &quot;Anyone with the link&quot;
                                         </div>
-                                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, textAlign: "center" }}>
-                                            Uploading... {uploadProgress}%
+                                        <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                                            Right-click → Share → Change to &quot;Anyone with the link&quot; → Copy link
                                         </div>
                                     </div>
-                                )}
+                                </div>
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                                    <div style={{
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: "50%",
+                                        background: "rgba(108,92,231,0.15)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        flexShrink: 0,
+                                        fontSize: 14,
+                                        fontWeight: 700,
+                                        color: "var(--accent-primary)",
+                                    }}>3</div>
+                                    <div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+                                            Paste the link below
+                                        </div>
+                                        <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                                            Paste your Google Drive share link and we&apos;ll handle the rest
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                        ) : (
-                            /* ─── Drop zone ─── */
-                            <div
-                                onClick={() => fileInputRef.current?.click()}
-                                onDrop={handleDrop}
-                                onDragOver={handleDragOver}
-                                onDragLeave={handleDragLeave}
-                                style={{
-                                    border: `2px dashed ${isDragging ? "var(--accent-primary)" : "var(--border-subtle)"}`,
-                                    borderRadius: 16,
-                                    padding: "48px 24px",
-                                    textAlign: "center",
-                                    cursor: "pointer",
-                                    transition: "all 0.3s ease",
-                                    background: isDragging ? "rgba(108,92,231,0.08)" : "var(--bg-secondary)",
-                                }}
-                            >
-                                <Upload
-                                    size={36}
-                                    style={{
-                                        color: isDragging ? "var(--accent-primary)" : "var(--text-muted)",
-                                        marginBottom: 12,
-                                    }}
-                                />
-                                <p style={{ color: "var(--text-secondary)", marginBottom: 4 }}>
-                                    Drag & drop your video here, or click to browse
-                                </p>
-                                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                                    MP4, MOV, WebM — max 500MB
-                                </p>
-                            </div>
-                        )}
-
+                        </div>
                         <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="video/*"
-                            onChange={handleFileInputChange}
-                            style={{ display: "none" }}
+                            type="url"
+                            value={videoUrl}
+                            onChange={(e) => setVideoUrl(e.target.value)}
+                            placeholder="https://drive.google.com/file/d/..."
+                            className="input-field"
+                            required
                         />
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                marginTop: 8,
+                                fontSize: 13,
+                                color: "var(--text-muted)",
+                            }}
+                        >
+                            <Info size={14} />
+                            Make sure the file is shared publicly (Anyone with the link)
+                        </div>
                     </div>
                 )}
 
-                {/* ─── Drive ─── */}
+                {/* ─── Direct Drive Link ─── */}
                 {sourceType === "drive" && (
                     <div style={{ marginBottom: 28 }}>
                         <label
@@ -571,7 +476,7 @@ export default function NewVideoPage() {
                 <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isSubmitting || isUploading || (sourceType !== "upload" && !videoUrl.trim()) || (sourceType === "upload" && !selectedFile)}
+                    disabled={isSubmitting || !videoUrl.trim()}
                     style={{
                         width: "100%",
                         justifyContent: "center",
@@ -582,7 +487,7 @@ export default function NewVideoPage() {
                     {isSubmitting ? (
                         <>
                             <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
-                            {isUploading ? "Uploading..." : "Submitting..."}
+                            Submitting...
                         </>
                     ) : (
                         <>

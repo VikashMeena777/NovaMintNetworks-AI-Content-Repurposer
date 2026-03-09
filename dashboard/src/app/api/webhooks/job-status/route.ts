@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
  *
  * Called by the processing pipeline when a job completes or fails.
  * - Updates clips_used in the user's profile
- * - Cleans up uploaded video files from Supabase Storage
- * - Sends an email notification to the user via Resend
+ * - Sends email notification via Resend
+ * - Sends Discord notification via user's webhook URL
  *
  * Body: { job_id, status, error_message?, webhook_secret }
  */
@@ -72,7 +72,6 @@ export async function POST(request: NextRequest) {
     // ── Update clips_used in user profile when job completes successfully ──
     if (status === "done" && job.clips_count > 0) {
       try {
-        // Get current profile
         const profileRes = await fetch(
           `${supabaseUrl}/rest/v1/profiles?id=eq.${job.user_id}&select=clips_used`,
           {
@@ -104,47 +103,10 @@ export async function POST(request: NextRequest) {
         }
       } catch (err) {
         console.error("Failed to update clips_used:", err);
-        // Don't fail the webhook — the job is still done
       }
     }
 
-    // ── Clean up uploaded video file from Supabase Storage ──
-    if (job.source_type === "upload" && job.video_url) {
-      try {
-        // Extract the storage path from the public URL
-        // Format: {supabaseUrl}/storage/v1/object/public/videos/{userId}/{filename}
-        const storagePrefix = `/storage/v1/object/public/videos/`;
-        const urlObj = new URL(job.video_url);
-        const pathIndex = urlObj.pathname.indexOf(storagePrefix);
-
-        if (pathIndex >= 0) {
-          const filePath = urlObj.pathname.substring(pathIndex + storagePrefix.length);
-
-          // Delete the file from Supabase Storage
-          const deleteRes = await fetch(
-            `${supabaseUrl}/storage/v1/object/videos/${filePath}`,
-            {
-              method: "DELETE",
-              headers: {
-                apikey: serviceKey,
-                Authorization: `Bearer ${serviceKey}`,
-              },
-            }
-          );
-
-          if (deleteRes.ok) {
-            console.log(`Cleaned up uploaded file: videos/${filePath}`);
-          } else {
-            console.warn(`Failed to clean up file: videos/${filePath}, status: ${deleteRes.status}`);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to clean up uploaded file:", err);
-        // Don't fail the webhook — cleanup is best-effort
-      }
-    }
-
-    // ── Get user email from Supabase auth admin API ──
+    // ── Get user email + profile (for notification prefs) ──
     const userRes = await fetch(
       `${supabaseUrl}/auth/v1/admin/users/${job.user_id}`,
       {
@@ -166,32 +128,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── Get user notification preferences ──
+    let notifyEmail = true;
+    let notifyDiscord = false;
+    let notifyJobComplete = true;
+    let notifyJobFailed = true;
+    let discordWebhookUrl: string | null = null;
+
+    try {
+      const profileNotifRes = await fetch(
+        `${supabaseUrl}/rest/v1/profiles?id=eq.${job.user_id}&select=notify_email,notify_discord,notify_job_complete,notify_job_failed,discord_webhook_url`,
+        {
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+          },
+        }
+      );
+      const profileNotifData = await profileNotifRes.json();
+      if (profileNotifData && profileNotifData.length > 0) {
+        const prefs = profileNotifData[0];
+        notifyEmail = prefs.notify_email ?? true;
+        notifyDiscord = prefs.notify_discord ?? false;
+        notifyJobComplete = prefs.notify_job_complete ?? true;
+        notifyJobFailed = prefs.notify_job_failed ?? true;
+        discordWebhookUrl = prefs.discord_webhook_url || null;
+      }
+    } catch (err) {
+      console.warn("Could not fetch notification prefs, using defaults:", err);
+    }
+
     const dashboardUrl = process.env.NEXT_PUBLIC_APP_URL || "https://novamintnetworks.in";
     const jobUrl = `${dashboardUrl}/dashboard/${job_id}`;
 
-    // ── Send email based on status ──
-    if (status === "done") {
-      await resend.emails.send({
-        from: "ClipMint <no-reply@novamintnetworks.in>",
-        to: [userEmail],
-        subject: "🎬 Your clips are ready!",
-        html: buildSuccessEmail({
+    // ── Check if this notification type is enabled ──
+    const shouldNotify =
+      (status === "done" && notifyJobComplete) ||
+      (status === "failed" && notifyJobFailed);
+
+    // ── Send Email notification ──
+    if (shouldNotify && notifyEmail) {
+      try {
+        if (status === "done") {
+          await resend.emails.send({
+            from: "ClipMint <no-reply@novamintnetworks.in>",
+            to: [userEmail],
+            subject: "🎬 Your clips are ready!",
+            html: buildSuccessEmail({
+              jobUrl,
+              clipCount: job.clips_count || 0,
+              videoUrl: job.video_url || "",
+            }),
+          });
+        } else if (status === "failed") {
+          await resend.emails.send({
+            from: "ClipMint <no-reply@novamintnetworks.in>",
+            to: [userEmail],
+            subject: "⚠️ Video processing failed",
+            html: buildFailureEmail({
+              jobUrl,
+              errorMessage: error_message || "An unexpected error occurred",
+              videoUrl: job.video_url || "",
+            }),
+          });
+        }
+        console.log(`Email notification sent to ${userEmail} for status: ${status}`);
+      } catch (err) {
+        console.error("Failed to send email notification:", err);
+      }
+    }
+
+    // ── Send Discord notification ──
+    if (shouldNotify && notifyDiscord && discordWebhookUrl) {
+      try {
+        await sendDiscordNotification({
+          webhookUrl: discordWebhookUrl,
+          status,
           jobUrl,
           clipCount: job.clips_count || 0,
           videoUrl: job.video_url || "",
-        }),
-      });
-    } else if (status === "failed") {
-      await resend.emails.send({
-        from: "ClipMint <no-reply@novamintnetworks.in>",
-        to: [userEmail],
-        subject: "⚠️ Video processing failed",
-        html: buildFailureEmail({
-          jobUrl,
-          errorMessage: error_message || "An unexpected error occurred",
-          videoUrl: job.video_url || "",
-        }),
-      });
+          errorMessage: error_message,
+        });
+        console.log(`Discord notification sent for job ${job_id}`);
+      } catch (err) {
+        console.error("Failed to send Discord notification:", err);
+      }
     }
 
     return NextResponse.json({ sent: true, to: userEmail, status });
@@ -203,6 +224,54 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ── Discord Webhook ──
+
+async function sendDiscordNotification(opts: {
+  webhookUrl: string;
+  status: string;
+  jobUrl: string;
+  clipCount: number;
+  videoUrl: string;
+  errorMessage?: string;
+}) {
+  const isSuccess = opts.status === "done";
+
+  const embed = {
+    title: isSuccess ? "🎬 Your clips are ready!" : "⚠️ Processing failed",
+    description: isSuccess
+      ? `ClipMint generated **${opts.clipCount} clip${opts.clipCount !== 1 ? "s" : ""}** from your video.`
+      : `ClipMint encountered an error while processing your video.\n\n**Error:** ${opts.errorMessage || "An unexpected error occurred"}`,
+    color: isSuccess ? 0x39E508 : 0xEF4444,
+    fields: [
+      {
+        name: "📹 Source",
+        value: opts.videoUrl.length > 100
+          ? opts.videoUrl.slice(0, 100) + "..."
+          : opts.videoUrl || "N/A",
+        inline: false,
+      },
+      ...(isSuccess
+        ? [{ name: "📊 Clips", value: `${opts.clipCount}`, inline: true }]
+        : []),
+    ],
+    url: opts.jobUrl,
+    timestamp: new Date().toISOString(),
+    footer: {
+      text: "ClipMint by NovaMint Networks",
+    },
+  };
+
+  await fetch(opts.webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: "ClipMint",
+      avatar_url: "https://novamintnetworks.in/favicon.ico",
+      embeds: [embed],
+    }),
+  });
 }
 
 // ── Email Templates ──
