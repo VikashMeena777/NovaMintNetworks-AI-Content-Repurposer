@@ -127,12 +127,12 @@ export const PLAN_LIMITS: Record<Plan, { clips: number; videos: number; monthlyP
 
 /** Razorpay Plan IDs — REPLACE these with real IDs from your Razorpay Dashboard */
 export const RAZORPAY_PLAN_IDS: Record<string, string> = {
-    creator_monthly: "plan_CREATOR_MONTHLY",   // Replace with real Razorpay plan ID
-    creator_annual: "plan_CREATOR_ANNUAL",     // Replace with real Razorpay plan ID
-    pro_monthly: "plan_PRO_MONTHLY",           // Replace with real Razorpay plan ID
-    pro_annual: "plan_PRO_ANNUAL",             // Replace with real Razorpay plan ID
-    agency_monthly: "plan_AGENCY_MONTHLY",     // Replace with real Razorpay plan ID
-    agency_annual: "plan_AGENCY_ANNUAL",       // Replace with real Razorpay plan ID
+    creator_monthly: "plan_SPI1pVuGs6ffGT",   // Replace with real Razorpay plan ID
+    creator_annual: "plan_SPIBHw5kx6mnhK",     // Replace with real Razorpay plan ID
+    pro_monthly: "plan_SPIHEHPoGKqMv0",           // Replace with real Razorpay plan ID
+    pro_annual: "plan_SPIN2kfqywXpdk",             // Replace with real Razorpay plan ID
+    agency_monthly: "plan_SPIP4Iz0kRiDK2",     // Replace with real Razorpay plan ID
+    agency_annual: "plan_SPISGxM5I2VFPw",       // Replace with real Razorpay plan ID
 };
 
 export const CAPTION_STYLES: { value: CaptionStyle; label: string; description: string }[] = [
