@@ -27,7 +27,7 @@ export type JobStatus =
 
 export type ClipStatus = "ready" | "scheduled" | "published" | "failed";
 
-export type SubscriptionStatus = "none" | "created" | "authenticated" | "active" | "paused" | "halted" | "cancelled" | "completed" | "expired";
+export type SubscriptionStatus = "none" | "created" | "active" | "paused" | "cancelled" | "expired";
 export type PlanPeriod = "monthly" | "annual" | "one_time";
 
 export interface Profile {
@@ -45,9 +45,9 @@ export interface Profile {
     notify_job_failed: boolean;
     notify_weekly_report: boolean;
     discord_webhook_url: string | null;
-    razorpay_customer_id: string | null;
-    razorpay_subscription_id: string | null;
-    razorpay_payment_id: string | null;
+    cashfree_customer_id: string | null;
+    cashfree_subscription_id: string | null;
+    cashfree_order_id: string | null;
     subscription_status: SubscriptionStatus;
     plan_period: PlanPeriod;
     current_period_end: string | null;
@@ -58,10 +58,9 @@ export interface Profile {
 export interface Payment {
     id: string;
     user_id: string;
-    razorpay_payment_id: string;
-    razorpay_order_id: string | null;
-    razorpay_subscription_id: string | null;
-    razorpay_signature: string | null;
+    cashfree_order_id: string;
+    cashfree_payment_id: string | null;
+    cf_payment_id: string | null;
     amount: number;
     currency: string;
     plan: Plan;
@@ -120,19 +119,9 @@ export interface Clip {
 
 export const PLAN_LIMITS: Record<Plan, { clips: number; videos: number; monthlyPrice: number; annualPrice: number; label: string }> = {
     free: { clips: 5, videos: 2, monthlyPrice: 0, annualPrice: 0, label: "Free" },
-    creator: { clips: 50, videos: 5, monthlyPrice: 49900, annualPrice: 39900, label: "Creator" },
-    pro: { clips: 200, videos: 20, monthlyPrice: 149900, annualPrice: 119900, label: "Pro" },
-    agency: { clips: 9999, videos: 9999, monthlyPrice: 499900, annualPrice: 399900, label: "Agency" },
-};
-
-/** Razorpay Plan IDs — REPLACE these with real IDs from your Razorpay Dashboard */
-export const RAZORPAY_PLAN_IDS: Record<string, string> = {
-    creator_monthly: "plan_SPI1pVuGs6ffGT",   // Replace with real Razorpay plan ID
-    creator_annual: "plan_SPIBHw5kx6mnhK",     // Replace with real Razorpay plan ID
-    pro_monthly: "plan_SPIHEHPoGKqMv0",           // Replace with real Razorpay plan ID
-    pro_annual: "plan_SPIN2kfqywXpdk",             // Replace with real Razorpay plan ID
-    agency_monthly: "plan_SPIP4Iz0kRiDK2",     // Replace with real Razorpay plan ID
-    agency_annual: "plan_SPISGxM5I2VFPw",       // Replace with real Razorpay plan ID
+    creator: { clips: 50, videos: 5, monthlyPrice: 24900, annualPrice: 19900, label: "Creator" },
+    pro: { clips: 200, videos: 20, monthlyPrice: 89900, annualPrice: 71900, label: "Pro" },
+    agency: { clips: 9999, videos: 9999, monthlyPrice: 149900, annualPrice: 119900, label: "Agency" },
 };
 
 export const CAPTION_STYLES: { value: CaptionStyle; label: string; description: string }[] = [

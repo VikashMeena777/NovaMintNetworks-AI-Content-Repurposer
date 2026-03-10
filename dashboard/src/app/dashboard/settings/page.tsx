@@ -128,7 +128,7 @@ export default function SettingsPage() {
     const handleCancelSubscription = async () => {
         setCancelling(true);
         try {
-            const res = await fetch("/api/razorpay/cancel", { method: "POST" });
+            const res = await fetch("/api/cashfree/cancel", { method: "POST" });
             const data = await res.json();
 
             if (res.ok && data.success) {
@@ -168,7 +168,7 @@ export default function SettingsPage() {
     const planKey = profile?.plan ?? "free";
     const planInfo = PLAN_LIMITS[planKey];
     const initial = (profile?.full_name || "U").charAt(0).toUpperCase();
-    const hasActiveSubscription = profile?.subscription_status === "active" || profile?.subscription_status === "authenticated";
+    const hasActiveSubscription = profile?.subscription_status === "active";
     const isCancelled = profile?.subscription_status === "cancelled";
     const periodEndDate = profile?.current_period_end ? new Date(profile.current_period_end) : null;
 
@@ -449,7 +449,7 @@ export default function SettingsPage() {
                             )}
 
                             {/* Cancel button (only for active subscriptions) */}
-                            {hasActiveSubscription && profile?.razorpay_subscription_id && (
+                            {hasActiveSubscription && (profile?.cashfree_subscription_id || profile?.cashfree_order_id) && (
                                 <button
                                     className="btn-secondary"
                                     onClick={() => setShowCancelConfirm(true)}
@@ -488,7 +488,7 @@ export default function SettingsPage() {
                                 className="btn-primary"
                                 style={{ textDecoration: "none", display: "flex", justifyContent: "center", marginTop: 20, padding: "12px 24px" }}
                             >
-                                <Sparkles size={16} /> Upgrade to Creator — ₹499/mo
+                                <Sparkles size={16} /> Upgrade to Creator — ₹249/mo
                             </a>
                         </div>
                     )}

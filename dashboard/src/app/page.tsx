@@ -618,7 +618,7 @@ export default function HomePage() {
               },
               {
                 name: "Creator",
-                price: "₹499",
+                price: "₹249",
                 period: "/month",
                 features: [
                   "50 clips/month",
@@ -632,7 +632,7 @@ export default function HomePage() {
               },
               {
                 name: "Pro",
-                price: "₹1,499",
+                price: "₹899",
                 period: "/month",
                 features: [
                   "200 clips/month",
@@ -646,7 +646,7 @@ export default function HomePage() {
               },
               {
                 name: "Agency",
-                price: "₹4,999",
+                price: "₹1,499",
                 period: "/month",
                 features: [
                   "Unlimited clips",

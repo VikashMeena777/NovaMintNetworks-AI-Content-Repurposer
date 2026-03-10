@@ -3,7 +3,6 @@
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import Link from "next/link";
-import Script from "next/script";
 import {
     CheckCircle2,
     ArrowRight,
@@ -13,16 +12,8 @@ import {
     CreditCard,
     RefreshCw,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase";
-
-/* ─── Razorpay global type ─── */
-declare global {
-    interface Window {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        Razorpay: new (options: any) => { open: () => void; on: (event: string, cb: () => void) => void };
-    }
-}
 
 /* ─── Plan data ─── */
 const PLANS = [
@@ -46,8 +37,8 @@ const PLANS = [
     {
         key: "creator" as const,
         name: "Creator",
-        monthlyPrice: "₹499",
-        annualPrice: "₹399",
+        monthlyPrice: "₹249",
+        annualPrice: "₹199",
         period: "/month",
         features: [
             "50 clips/month",
@@ -64,8 +55,8 @@ const PLANS = [
     {
         key: "pro" as const,
         name: "Pro",
-        monthlyPrice: "₹1,499",
-        annualPrice: "₹1,199",
+        monthlyPrice: "₹899",
+        annualPrice: "₹719",
         period: "/month",
         features: [
             "200 clips/month",
@@ -83,8 +74,8 @@ const PLANS = [
     {
         key: "agency" as const,
         name: "Agency",
-        monthlyPrice: "₹4,999",
-        annualPrice: "₹3,999",
+        monthlyPrice: "₹1,499",
+        annualPrice: "₹1,199",
         period: "/month",
         features: [
             "Unlimited clips",
@@ -104,7 +95,7 @@ const PLANS = [
 const BILLING_FAQ = [
     {
         q: "What payment methods do you accept?",
-        a: "We accept all major credit/debit cards, UPI, net banking, and wallets via Razorpay. All payments are securely processed.",
+        a: "We accept all major credit/debit cards, UPI, net banking, and wallets via Cashfree. All payments are securely processed with 256-bit encryption.",
     },
     {
         q: "Can I cancel anytime?",
@@ -135,6 +126,7 @@ export default function PricingPage() {
     const [paymentType, setPaymentType] = useState<"subscription" | "one_time">("subscription");
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [cashfreeLoaded, setCashfreeLoaded] = useState(false);
 
     useEffect(() => {
         const supabase = createClient();
@@ -143,10 +135,20 @@ export default function PricingPage() {
         });
     }, []);
 
-    function showToast(type: "success" | "error", message: string) {
+    // Load Cashfree JS SDK
+    useEffect(() => {
+        if (typeof window !== "undefined" && !cashfreeLoaded) {
+            const script = document.createElement("script");
+            script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+            script.onload = () => setCashfreeLoaded(true);
+            document.head.appendChild(script);
+        }
+    }, [cashfreeLoaded]);
+
+    const showToast = useCallback((type: "success" | "error", message: string) => {
         setToast({ type, message });
         setTimeout(() => setToast(null), 5000);
-    }
+    }, []);
 
     async function handleCheckout(planKey: string) {
         if (planKey === "free") {
@@ -164,7 +166,7 @@ export default function PricingPage() {
         try {
             const period = paymentType === "one_time" ? "one_time" : annual ? "annual" : "monthly";
 
-            const res = await fetch("/api/razorpay/create-subscription", {
+            const res = await fetch("/api/cashfree/create-order", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ plan: planKey, period }),
@@ -178,52 +180,38 @@ export default function PricingPage() {
                 return;
             }
 
-            // Open Razorpay Checkout
-            const options = {
-                key: data.key_id,
-                amount: data.amount,
-                currency: data.currency || "INR",
-                name: "ClipMint",
-                description: `${data.plan.charAt(0).toUpperCase() + data.plan.slice(1)} Plan — ${period === "one_time" ? "One-time" : period === "annual" ? "Annual" : "Monthly"}`,
-                image: "/logo.png",
-                ...(data.type === "subscription"
-                    ? { subscription_id: data.subscription_id }
-                    : { order_id: data.order_id }),
-                prefill: {
-                    email: data.user_email,
-                    name: data.user_name,
-                },
-                theme: {
-                    color: "#6C5CE7",
-                    backdrop_color: "rgba(0, 0, 0, 0.7)",
-                },
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                handler: async function (response: any) {
-                    // Verify payment on server
+            // Open Cashfree Checkout
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const cashfree = (window as any).Cashfree?.({
+                mode: data.environment === "production" ? "production" : "sandbox",
+            });
+
+            if (!cashfree) {
+                showToast("error", "Payment system is loading. Please try again in a moment.");
+                setLoadingPlan(null);
+                return;
+            }
+
+            const checkoutOptions = {
+                paymentSessionId: data.payment_session_id,
+                redirectTarget: "_modal",
+            };
+
+            cashfree.checkout(checkoutOptions).then(async (result: { error?: { message: string }; redirect?: boolean; paymentDetails?: { paymentMessage: string } }) => {
+                if (result.error) {
+                    showToast("error", result.error.message || "Payment failed. Please try again.");
+                    setLoadingPlan(null);
+                } else if (result.redirect) {
+                    // Payment will be verified on redirect
+                    console.log("Payment redirecting...");
+                } else if (result.paymentDetails) {
+                    // Payment completed in modal, verify on server
                     try {
-                        const verifyRes = await fetch(
-                            "/api/razorpay/verify-payment",
-                            {
-                                method: "POST",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify({
-                                    type: data.type,
-                                    razorpay_payment_id:
-                                        response.razorpay_payment_id,
-                                    razorpay_order_id:
-                                        response.razorpay_order_id || null,
-                                    razorpay_subscription_id:
-                                        response.razorpay_subscription_id ||
-                                        null,
-                                    razorpay_signature:
-                                        response.razorpay_signature,
-                                    plan: planKey,
-                                    period,
-                                }),
-                            }
-                        );
+                        const verifyRes = await fetch("/api/cashfree/verify-payment", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ order_id: data.order_id }),
+                        });
 
                         const verifyData = await verifyRes.json();
 
@@ -238,23 +226,11 @@ export default function PricingPage() {
                     } catch {
                         showToast("error", "Payment verification failed. Please contact support.");
                     }
-                },
-                modal: {
-                    ondismiss: function () {
-                        setLoadingPlan(null);
-                    },
-                },
-            };
-
-            const rzp = new window.Razorpay(options);
-            rzp.on("payment.failed", function () {
-                showToast("error", "Payment failed. Please try again.");
-                setLoadingPlan(null);
+                    setLoadingPlan(null);
+                }
             });
-            rzp.open();
         } catch {
             showToast("error", "Something went wrong. Please try again.");
-        } finally {
             setLoadingPlan(null);
         }
     }
@@ -262,7 +238,6 @@ export default function PricingPage() {
     return (
         <main>
             <Navbar />
-            <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
 
             {/* ─── Toast ─── */}
             {toast && (
@@ -622,7 +597,7 @@ export default function PricingPage() {
                     </div>
                 </div>
 
-                {/* ─── Razorpay Trust Badge ─── */}
+                {/* ─── Cashfree Trust Badge ─── */}
                 <div style={{ textAlign: "center", marginBottom: 48 }}>
                     <div
                         className="glass-card"
@@ -637,7 +612,7 @@ export default function PricingPage() {
                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                         </svg>
                         <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                            Secure payments powered by <strong style={{ color: "var(--text-primary)" }}>Razorpay</strong> • 256-bit SSL encryption
+                            Secure payments powered by <strong style={{ color: "var(--text-primary)" }}>Cashfree</strong> • 256-bit SSL encryption
                         </span>
                     </div>
                 </div>
