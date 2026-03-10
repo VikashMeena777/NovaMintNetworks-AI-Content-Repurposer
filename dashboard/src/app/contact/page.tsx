@@ -96,6 +96,11 @@ export default function ContactPage() {
                                 value: "Jaipur, Rajasthan, India",
                             },
                             {
+                                icon: <Send size={22} />,
+                                title: "Founder",
+                                value: "VIKASH MEENA",
+                            },
+                            {
                                 icon: <Clock size={22} />,
                                 title: "Support Hours",
                                 value: "Mon – Sat, 10 AM – 7 PM IST",

@@ -175,6 +175,7 @@ export default function AboutPage() {
                             NovaMint Networks
                         </strong>
                     </p>
+                    <p>Founder of ClipMint - VIKASH MEENA</p>
                     <p>Jaipur, Rajasthan, India</p>
                     <p>
                         <a

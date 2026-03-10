@@ -120,9 +120,16 @@ async function handleVerification(request: NextRequest) {
             return NextResponse.json({ error: "Failed to upgrade plan" }, { status: 500 });
         }
 
-        // Log payment
+        // Log payment (requires service role / bypass RLS)
+        const { createClient: createServiceClient } = await import("@supabase/supabase-js");
+        const supabaseAdmin = createServiceClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
         const amount = period === "annual" ? planInfo.annualPrice * 12 : planInfo.monthlyPrice;
-        await supabase.from("payments").insert({
+
+        const { error: insertError } = await supabaseAdmin.from("payments").insert({
             user_id: user.id,
             cashfree_order_id: orderId,
             cashfree_payment_id: successPayment.cf_payment_id?.toString() || null,
@@ -133,6 +140,11 @@ async function handleVerification(request: NextRequest) {
             plan_period: period,
             status: "captured",
         });
+
+        if (insertError) {
+            console.error("Failed to insert payment log:", insertError);
+            // We still proceed since the profile was upgraded successfully
+        }
 
         if (request.method === "GET") {
             return NextResponse.redirect(new URL("/dashboard?payment=success", request.nextUrl.origin));

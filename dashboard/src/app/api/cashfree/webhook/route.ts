@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { PLAN_LIMITS, type Plan } from "@/lib/types";
+import { Cashfree, CFEnvironment } from "cashfree-pg";
+
+// Initialize Cashfree SDK v5 for Webhook Verification
+const cashfree = new Cashfree(
+    process.env.CASHFREE_ENV === "PRODUCTION" ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX,
+    process.env.CASHFREE_APP_ID!,
+    process.env.CASHFREE_SECRET_KEY!
+);
 
 /**
  * POST /api/cashfree/webhook
@@ -26,30 +34,16 @@ function getServiceClient() {
     );
 }
 
-function verifyWebhookSignature(rawBody: string, timestamp: string, signature: string): boolean {
-    const webhookSecret = process.env.CASHFREE_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-        console.error("CASHFREE_WEBHOOK_SECRET not configured");
-        return false;
-    }
-
-    const signedPayload = timestamp + rawBody;
-    const expectedSignature = crypto
-        .createHmac("sha256", webhookSecret)
-        .update(signedPayload)
-        .digest("base64");
-
-    return expectedSignature === signature;
-}
-
 export async function POST(request: NextRequest) {
     const rawBody = await request.text();
-    const timestamp = request.headers.get("x-cashfree-timestamp") || "";
-    const signature = request.headers.get("x-cashfree-signature") || "";
+    const timestamp = request.headers.get("x-webhook-timestamp") || request.headers.get("x-cashfree-timestamp") || "";
+    const signature = request.headers.get("x-webhook-signature") || request.headers.get("x-cashfree-signature") || "";
 
-    // Verify webhook signature
-    if (!verifyWebhookSignature(rawBody, timestamp, signature)) {
-        console.error("Cashfree webhook signature verification failed");
+    // Verify webhook signature using Cashfree SDK
+    try {
+        cashfree.PGVerifyWebhookSignature(signature, rawBody, timestamp);
+    } catch (err) {
+        console.error("Cashfree webhook signature verification failed:", err);
         return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
 
