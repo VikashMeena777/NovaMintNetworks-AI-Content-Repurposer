@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Film, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 
@@ -79,7 +79,7 @@ export default function Navbar() {
                         textDecoration: "none",
                     }}
                 >
-                    <Film size={28} style={{ color: "var(--accent-primary)" }} />
+                    <img src="/clipmint-logo.jpg" alt="ClipMint" style={{ height: 36, width: 36, borderRadius: 8, objectFit: "cover" }} />
                     <span
                         className="gradient-text"
                         style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}

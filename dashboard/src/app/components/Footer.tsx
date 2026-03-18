@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Film } from "lucide-react";
+
 
 const FOOTER_COLUMNS = [
     {
@@ -119,7 +119,7 @@ export default function Footer() {
                 <div
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
                 >
-                    <Film size={18} style={{ color: "var(--accent-primary)" }} />
+                    <img src="/clipmint-logo.jpg" alt="ClipMint" style={{ height: 18, width: 18, borderRadius: 4, objectFit: "cover" }} />
                     <span
                         className="gradient-text"
                         style={{ fontWeight: 700, fontSize: 15 }}

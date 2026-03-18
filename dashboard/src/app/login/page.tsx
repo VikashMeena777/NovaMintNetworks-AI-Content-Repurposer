@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { Film, Mail, Lock, ArrowRight, Loader2, ArrowLeft } from "lucide-react";
+import { Mail, Lock, ArrowRight, Loader2, ArrowLeft } from "lucide-react";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -121,10 +121,7 @@ export default function LoginPage() {
                         marginBottom: 8,
                     }}
                 >
-                    <Film
-                        size={32}
-                        style={{ color: "var(--accent-primary)" }}
-                    />
+                    <img src="/clipmint-logo.jpg" alt="ClipMint" style={{ height: 40, width: 40, borderRadius: 8, objectFit: "cover" }} />
                     <span
                         className="gradient-text"
                         style={{

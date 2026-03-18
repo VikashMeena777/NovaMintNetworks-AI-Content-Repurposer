@@ -109,7 +109,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {/* Logo + Collapse toggle */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", marginBottom: 24 }}>
                     <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}>
-                        <Film size={24} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
+                        <img src="/clipmint-logo.jpg" alt="ClipMint" style={{ height: 28, width: 28, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
                         {!collapsed && <span className="gradient-text sidebar-label" style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.5 }}>ClipMint</span>}
                     </Link>
                     <button

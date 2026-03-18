@@ -1,6 +1,6 @@
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import { Film, Target, Lightbulb, Rocket } from "lucide-react";
+import { Target, Lightbulb, Rocket } from "lucide-react";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -25,7 +25,7 @@ export default function AboutPage() {
                             marginBottom: 24,
                         }}
                     >
-                        <Film size={36} style={{ color: "var(--accent-primary)" }} />
+                        <img src="/clipmint-logo.jpg" alt="ClipMint" style={{ height: 36, width: 36, borderRadius: 8, objectFit: "cover" }} />
                         <span
                             className="gradient-text"
                             style={{ fontSize: 32, fontWeight: 800, letterSpacing: -0.5 }}
