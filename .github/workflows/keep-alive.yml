@@ -1,0 +1,45 @@
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # Run every 3 days at 6 AM UTC (11:30 AM IST)
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping ClipMint Supabase
+        run: |
+          echo "🏓 Pinging ClipMint Supabase..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://zwgooqazqxqnfdgmhsev.supabase.co/rest/v1/" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3Z29vcWF6cXhxbmZkZ21oc2V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3NDcxOTYsImV4cCI6MjA4ODMyMzE5Nn0.7KnhAaVTHXQGgHDjFaZUlnGvkCvFMCVpzQo-KNfptKk" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3Z29vcWF6cXhxbmZkZ21oc2V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3NDcxOTYsImV4cCI6MjA4ODMyMzE5Nn0.7KnhAaVTHXQGgHDjFaZUlnGvkCvFMCVpzQo-KNfptKk")
+          echo "ClipMint Response: $RESPONSE"
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "⚠️ ClipMint ping returned non-200 status: $RESPONSE"
+          else
+            echo "✅ ClipMint Supabase is alive!"
+          fi
+
+      - name: Ping FrameMint Supabase
+        run: |
+          echo "🏓 Pinging FrameMint Supabase..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://ndxhddaovzichvutqmjt.supabase.co/rest/v1/" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5keGhkZGFvdnppY2h2dXRxbWp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjQ4MzIsImV4cCI6MjA4ODkwMDgzMn0.EoDxXmcvugy6iK8AuZcFrHXbne16fI2f25AWQbBu4HM" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5keGhkZGFvdnppY2h2dXRxbWp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjQ4MzIsImV4cCI6MjA4ODkwMDgzMn0.EoDxXmcvugy6iK8AuZcFrHXbne16fI2f25AWQbBu4HM")
+          echo "FrameMint Response: $RESPONSE"
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "⚠️ FrameMint ping returned non-200 status: $RESPONSE"
+          else
+            echo "✅ FrameMint Supabase is alive!"
+          fi
+
+      - name: Summary
+        run: |
+          echo "================================================"
+          echo "🎉 Keep-alive pings completed at $(date -u)"
+          echo "================================================"
