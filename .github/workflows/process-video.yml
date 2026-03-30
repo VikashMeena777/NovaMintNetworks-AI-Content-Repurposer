@@ -108,6 +108,10 @@ jobs:
 
           yt-dlp \
             --js-runtimes deno \
+            --force-ipv4 \
+            --retries 10 \
+            --fragment-retries 10 \
+            --retry-sleep 3 \
             --remote-components "ejs:github" \
             --format "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" \
             --merge-output-format mp4 \
