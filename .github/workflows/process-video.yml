@@ -77,7 +77,7 @@ jobs:
 
       - name: Install Remotion dependencies
         working-directory: remotion-captions
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Update job status → downloading
         env:
@@ -678,14 +678,44 @@ jobs:
       # ─────────────────────────────────────────────────────────────
       # 4d. Silence Detection for Clean Cut Points (Tier 1.4)
       # ─────────────────────────────────────────────────────────────
-      - name: Detect silence gaps
+      - name: Detect silence gaps (adaptive threshold)
         run: |
-          echo "🔇 Detecting silence gaps for clean clip boundaries..."
+          echo "🔇 Detecting silence gaps with adaptive loudnorm threshold..."
+
+          # ── Pass 1: Measure the audio's actual noise floor ──
+          # The loudnorm filter's first pass reports input_thresh, which is
+          # the measured noise floor of THIS specific audio. Using it as
+          # the silencedetect threshold adapts to quiet podcasts vs loud
+          # music without any hardcoded dB value. (silence-detection.md skill)
+          LOUDNORM_JSON=$(ffmpeg -i workspace/audio/audio.wav \
+            -af "loudnorm=print_format=json" \
+            -f null - 2>&1 | sed -n '/{/,/}/p')
+
+          # Extract input_thresh (noise floor) — fallback to -35 if parse fails
+          INPUT_THRESH=$(echo "$LOUDNORM_JSON" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              thresh = float(data.get('input_thresh', '-35.0'))
+              # Clamp to reasonable range: never quieter than -50, never louder than -20
+              thresh = max(-50.0, min(-20.0, thresh))
+              print(f'{thresh:.1f}')
+          except:
+              print('-35.0')
+          " 2>/dev/null || echo "-35.0")
+
+          echo "  📊 Measured noise floor: ${INPUT_THRESH}dB (using as silence threshold)"
+
+          # ── Pass 2: Detect silences using the adaptive threshold ──
           ffmpeg -i workspace/audio/audio.wav \
-            -af "silencedetect=noise=-35dB:d=0.3" \
+            -af "silencedetect=noise=${INPUT_THRESH}dB:d=0.3" \
             -f null - 2>&1 | grep "silence_" > workspace/audio/silences.txt || true
+
           SILENCE_COUNT=$(wc -l < workspace/audio/silences.txt)
-          echo "✅ Found $SILENCE_COUNT silence markers"
+          echo "✅ Found $SILENCE_COUNT silence markers (threshold: ${INPUT_THRESH}dB)"
+
+          # Save threshold for downstream steps
+          echo "$INPUT_THRESH" > workspace/audio/silence_threshold.txt
 
       - name: Update job status → analyzing
         env:
@@ -1080,6 +1110,9 @@ jobs:
 
           STYLE="${{ inputs.caption_style }}"
 
+          # Read the adaptive silence threshold from the detection step
+          SILENCE_THRESH=$(cat ../workspace/audio/silence_threshold.txt 2>/dev/null || echo "-35.0")
+
           for clip in ../workspace/clips/clip_*.mp4; do
             BASENAME=$(basename "$clip" .mp4)
             CAPTIONS_FILE="../workspace/clips/${BASENAME}.captions.json"
@@ -1099,8 +1132,40 @@ jobs:
             DURATION_FRAMES=$(python3 -c \
               "import math; print(max(1, math.ceil(${CLIP_DURATION} * 30)))")
 
-            # Copy video into Remotion's public/ folder so the dev server
-            # can serve it at a relative URL (staticFile path).
+            # ── Per-clip silence trim detection (silence-detection.md + videos.md) ──
+            # Detect leading/trailing silence in THIS clip using the adaptive threshold.
+            # Remotion's <Video trimBefore/trimAfter> will skip these silent frames.
+            TRIM_DATA=$(ffmpeg -i "$clip" \
+              -af "silencedetect=noise=${SILENCE_THRESH}dB:d=0.2" \
+              -f null - 2>&1 | python3 -c "
+            import sys, re
+            lines = sys.stdin.read()
+            clip_dur = float('${CLIP_DURATION}')
+            silences = []
+            starts = re.findall(r'silence_start:\s*([\d.]+)', lines)
+            ends = re.findall(r'silence_end:\s*([\d.]+)', lines)
+            for s, e in zip(starts, ends):
+                silences.append((float(s), float(e)))
+            # Leading silence: first gap that starts at or near 0
+            trim_start = 0.0
+            if silences and silences[0][0] < 0.1:
+                trim_start = min(silences[0][1], 2.0)  # Cap at 2s
+            # Trailing silence: last gap that ends at or near clip end
+            trim_end = 0.0
+            if silences and abs(silences[-1][1] - clip_dur) < 0.3:
+                trail_dur = silences[-1][1] - silences[-1][0]
+                trim_end = min(trail_dur, 2.0)  # Cap at 2s
+            print(f'{trim_start:.3f},{trim_end:.3f}')
+            " 2>/dev/null || echo "0.000,0.000")
+
+            TRIM_START=$(echo "$TRIM_DATA" | cut -d',' -f1)
+            TRIM_END=$(echo "$TRIM_DATA" | cut -d',' -f2)
+
+            if [ "$TRIM_START" != "0.000" ] || [ "$TRIM_END" != "0.000" ]; then
+              echo "  ✂️ $BASENAME: trimming ${TRIM_START}s lead / ${TRIM_END}s tail silence"
+            fi
+
+            # Copy video into Remotion's public/ folder so staticFile() works
             mkdir -p public
             cp "$clip" "public/${BASENAME}.mp4"
 
@@ -1114,7 +1179,9 @@ jobs:
               'captionStyle': '$STYLE',
               'backgroundColor': '#000000',
               'accentColor': '#39E508',
-              'fontSize': 68
+              'fontSize': 68,
+              'trimStartSec': float('${TRIM_START}'),
+              'trimEndSec': float('${TRIM_END}')
           }
           print(json.dumps(props))
           " > /tmp/remotion_props.json
@@ -1130,6 +1197,9 @@ jobs:
                 echo "  ⚠️ Remotion failed for $BASENAME — copying raw clip"
                 cp "$clip" "$OUTPUT"
               }
+
+            # Clean up public/ to save disk between renders
+            rm -f "public/${BASENAME}.mp4"
           done
 
           echo "✅ Caption rendering complete"

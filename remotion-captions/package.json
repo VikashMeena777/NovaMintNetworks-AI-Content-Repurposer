@@ -1,6 +1,6 @@
 {
     "name": "clipmint-captions",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "ClipMint — Professional animated captions for short-form video clips",
     "scripts": {
         "start": "npx remotion studio",
@@ -11,6 +11,9 @@
     "dependencies": {
         "@remotion/cli": "^4.0.0",
         "@remotion/captions": "^4.0.0",
+        "@remotion/google-fonts": "^4.0.0",
+        "@remotion/media": "^4.0.0",
+        "@remotion/media-utils": "^4.0.0",
         "@remotion/zod-types": "^4.0.0",
         "remotion": "^4.0.0",
         "react": "^18.3.1",
